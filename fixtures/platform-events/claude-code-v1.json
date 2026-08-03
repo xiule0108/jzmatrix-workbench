@@ -1,0 +1,55 @@
+{
+  "contract": "jzmatrix.synthetic-platform-events",
+  "version": "1.0.0",
+  "fixture_id": "claude-code-synthetic-v1",
+  "platform": "claude_code",
+  "synthetic": true,
+  "source_observation": "10A_P0_platform_probe",
+  "protocol_coverage": "observed_structured_event_categories_only",
+  "events": [
+    {
+      "event_id": "claude-fixture-event-001",
+      "run_id": "run:claude-synthetic-001",
+      "sequence": 1,
+      "observed_at": "2026-08-03T00:01:01Z",
+      "event_kind": "system.init",
+      "payload": {
+        "status": "initialized",
+        "session_ref": "platform:claude-synthetic-session-001"
+      }
+    },
+    {
+      "event_id": "claude-fixture-event-002",
+      "run_id": "run:claude-synthetic-001",
+      "sequence": 2,
+      "observed_at": "2026-08-03T00:01:02Z",
+      "event_kind": "assistant",
+      "payload": {
+        "status": "observed"
+      }
+    },
+    {
+      "event_id": "claude-fixture-event-003",
+      "run_id": "run:claude-synthetic-001",
+      "sequence": 3,
+      "observed_at": "2026-08-03T00:01:03Z",
+      "event_kind": "result",
+      "payload": {
+        "status": "completed",
+        "complete": true
+      }
+    },
+    {
+      "event_id": "claude-fixture-event-004",
+      "run_id": "run:claude-synthetic-001",
+      "sequence": 4,
+      "observed_at": "2026-08-03T00:01:04Z",
+      "event_kind": "exit",
+      "payload": {
+        "code": 0,
+        "complete": true
+      }
+    }
+  ],
+  "extensions": {}
+}

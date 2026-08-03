@@ -91,6 +91,56 @@ record(
   "Offline fixture must be fixed, demo-only, and network-free",
 );
 
+const platformManifest = readJson("fixtures/platform-events/manifest.json");
+const platformFixtureEntries = platformManifest.fixtures ?? [];
+const platformFixtureIds = platformFixtureEntries.map((entry) => entry.id).sort();
+const platformFixtureText = platformFixtureEntries
+  .filter(
+    (entry) =>
+      typeof entry.file === "string" &&
+      !entry.file.includes("/") &&
+      !entry.file.includes("\\") &&
+      !entry.file.includes(".."),
+  )
+  .map((entry) => readText(`fixtures/platform-events/${entry.file}`))
+  .join("\n");
+const platformFixtureForbidden =
+  /(?:\/Users\/|\/home\/|[A-Za-z]:\\|\\\\|https?:\/\/|file:\/\/|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|private[_-]?key|client[_-]?secret|transcript|prompt|response|tool[_-]?(?:input|output))/i;
+const platformFixtureHashesMatch = platformFixtureEntries.every((entry) => {
+  if (
+    typeof entry.file !== "string" ||
+    entry.file.includes("/") ||
+    entry.file.includes("\\") ||
+    entry.file.includes("..")
+  ) {
+    return false;
+  }
+  const bytes = readFileSync(join(repoRoot, "fixtures/platform-events", entry.file));
+  return createHash("sha256").update(bytes).digest("hex") === entry.sha256;
+});
+record(
+  "fixture.platform_events_integrity",
+  platformManifest.contract === "jzmatrix.synthetic-platform-fixture-manifest" &&
+    platformManifest.version === "1.0.0" &&
+    platformManifest.parser_version === "1.0.0" &&
+    platformManifest.synthetic === true &&
+    platformManifest.network_required === false &&
+    platformManifest.source_observation === "10A_P0_platform_probe" &&
+    platformManifest.protocol_coverage === "observed_structured_event_categories_only" &&
+    platformFixtureIds.join(",") === "claude-code-synthetic-v1,codex-cli-synthetic-v1" &&
+    platformFixtureEntries.every(
+      (entry) =>
+        entry.platform &&
+        entry.sha256 &&
+        Array.isArray(entry.observed_event_kinds) &&
+        entry.observed_event_kinds.length > 0,
+    ) &&
+    platformFixtureHashesMatch &&
+    !platformFixtureForbidden.test(platformFixtureText),
+  "fixtures/platform-events/manifest.json+fixture sha256",
+  "Synthetic platform fixtures must be embedded, fixed, safe, and network-free",
+);
+
 const sourceFiles = [
   ...walk("crates").filter(
     (path) => path.endsWith(".rs") && !normalizedPath(path).includes("/tests/"),

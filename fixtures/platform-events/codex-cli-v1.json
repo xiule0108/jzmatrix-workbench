@@ -1,0 +1,68 @@
+{
+  "contract": "jzmatrix.synthetic-platform-events",
+  "version": "1.0.0",
+  "fixture_id": "codex-cli-synthetic-v1",
+  "platform": "codex_cli",
+  "synthetic": true,
+  "source_observation": "10A_P0_platform_probe",
+  "protocol_coverage": "observed_structured_event_categories_only",
+  "events": [
+    {
+      "event_id": "codex-fixture-event-001",
+      "run_id": "run:codex-synthetic-001",
+      "sequence": 1,
+      "observed_at": "2026-08-03T00:00:01Z",
+      "event_kind": "thread.started",
+      "payload": {
+        "platform_ref": "platform:codex-synthetic-thread-001"
+      }
+    },
+    {
+      "event_id": "codex-fixture-event-002",
+      "run_id": "run:codex-synthetic-001",
+      "sequence": 2,
+      "observed_at": "2026-08-03T00:00:02Z",
+      "event_kind": "turn.started",
+      "payload": {
+        "status": "started"
+      }
+    },
+    {
+      "event_id": "codex-fixture-event-003",
+      "run_id": "run:codex-synthetic-001",
+      "sequence": 3,
+      "observed_at": "2026-08-03T00:00:03Z",
+      "event_kind": "item.completed",
+      "payload": {
+        "item_kind": "sentinel_result",
+        "status": "completed"
+      }
+    },
+    {
+      "event_id": "codex-fixture-event-004",
+      "run_id": "run:codex-synthetic-001",
+      "sequence": 4,
+      "observed_at": "2026-08-03T00:00:04Z",
+      "event_kind": "turn.completed",
+      "payload": {
+        "status": "completed"
+      }
+    },
+    {
+      "event_id": "codex-fixture-event-005",
+      "run_id": "run:codex-synthetic-001",
+      "sequence": 5,
+      "observed_at": "2026-08-03T00:00:05Z",
+      "event_kind": "exit",
+      "payload": {
+        "code": 0,
+        "complete": true
+      }
+    }
+  ],
+  "extensions": {
+    "future_marker": {
+      "preserved": true
+    }
+  }
+}

@@ -21,6 +21,7 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | Product and architecture plan | Frozen for constrained P1-A entry |
 | P1-A Rust/CLI/Tauri scaffold | Available on the construction branch |
 | Offline fixture and doctor | Implemented as a local baseline |
+| Fixed synthetic platform fixture parsing | Implemented for two bundled, manifest-verified fixtures |
 | macOS and Windows packages | Not released; Windows support is not claimed |
 | Real adapters and external writes | Not implemented |
 
@@ -41,6 +42,23 @@ npm run tauri:build:app
 ```
 
 The first command is only needed when the pinned Rust toolchain is not already available. `scripts/doctor.sh` deliberately uses Cargo offline and therefore reports a blocked toolchain if dependencies have not been bootstrapped. The app loads only bundled resources and exposes `doctor` and `offline_demo` in P1-A.
+
+### Fixed synthetic platform fixture parsing
+
+P1-A includes two fully synthetic, transcript-free, secret-free fixtures observed from the 10A probe categories:
+
+- `codex-cli-synthetic-v1`
+- `claude-code-synthetic-v1`
+
+They are embedded in the package and verified against `fixtures/platform-events/manifest.json`. The read-only CLI accepts only one of these built-in IDs:
+
+```sh
+cargo run --offline --locked -p jzmatrix-cli -- fixture inspect --id codex-cli-synthetic-v1 --json
+```
+
+The versioned parser returns event sequence evidence and separate `activity`, `local_written`, `sent_not_confirmed`, `delivered`, `accepted`, and `completed` observations. `completed`, process exit `0`, or a platform status string never upgrades delivery or acceptance. Unknown fields are retained under `extensions`; unknown events, sequence gaps, conflicts, secrets, session-body fields, remote URLs, and absolute paths fail closed or become an explicitly partial/unknown result.
+
+This is a fixed parser and evidence-view capability only. It does not execute an external process, read arbitrary paths, read existing sessions, persist prompt/tool/response bodies, or claim complete Codex/Claude Code protocol coverage. Real adapters, create/send/resume/cancel, Windows support, and S2 evidence remain outside this branch.
 
 `tauri:build:app` produces an unsigned macOS `.app` baseline. Signing, notarization, release installers, and update/rollback infrastructure are outside P1-A.
 

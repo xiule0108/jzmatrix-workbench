@@ -1,0 +1,37 @@
+{
+  "contract": "jzmatrix.synthetic-platform-fixture-manifest",
+  "version": "1.0.0",
+  "parser_version": "1.0.0",
+  "synthetic": true,
+  "network_required": false,
+  "source_observation": "10A_P0_platform_probe",
+  "protocol_coverage": "observed_structured_event_categories_only",
+  "fixtures": [
+    {
+      "id": "codex-cli-synthetic-v1",
+      "platform": "codex_cli",
+      "file": "codex-cli-v1.json",
+      "sha256": "d071c2eab29bcda2c4bb5b642b18037a4e75d08443df95591b514333e5181c2f",
+      "observed_event_kinds": [
+        "thread.started",
+        "turn.started",
+        "item.completed",
+        "turn.completed",
+        "exit"
+      ]
+    },
+    {
+      "id": "claude-code-synthetic-v1",
+      "platform": "claude_code",
+      "file": "claude-code-v1.json",
+      "sha256": "5bc6db1f83dca8bb158f4570506932e2d852845fefcb76a60d01dad80907065a",
+      "observed_event_kinds": [
+        "system.init",
+        "assistant",
+        "result",
+        "exit"
+      ]
+    }
+  ],
+  "extensions": {}
+}
