@@ -1,0 +1,2 @@
+# The offline-demo fixture is hashed as exact bytes by the P1-A verifier.
+fixtures/offline-demo/*.json text eol=lf

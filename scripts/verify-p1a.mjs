@@ -31,6 +31,10 @@ function walk(path) {
   );
 }
 
+function normalizedPath(path) {
+  return path.replaceAll("\\", "/");
+}
+
 const rootPackage = readJson("package.json");
 record(
   "toolchain.node_npm",
@@ -88,15 +92,19 @@ record(
 );
 
 const sourceFiles = [
-  ...walk("crates").filter((path) => path.endsWith(".rs") && !path.includes("/tests/")),
+  ...walk("crates").filter(
+    (path) => path.endsWith(".rs") && !normalizedPath(path).includes("/tests/"),
+  ),
   ...walk("apps/desktop/src").filter((path) => path.endsWith(".ts") || path.endsWith(".css")),
   ...walk("apps/desktop/src-tauri").filter(
     (path) =>
-      !path.startsWith("apps/desktop/src-tauri/gen/") &&
+      !normalizedPath(path).startsWith("apps/desktop/src-tauri/gen/") &&
       (path.endsWith(".rs") || path.endsWith(".json")),
   ),
   ...walk("scripts").filter(
-    (path) => (path.endsWith(".sh") || path.endsWith(".mjs")) && path !== "scripts/verify-p1a.mjs",
+    (path) =>
+      (path.endsWith(".sh") || path.endsWith(".mjs")) &&
+      normalizedPath(path) !== "scripts/verify-p1a.mjs",
   ),
 ];
 const forbiddenLocalReference = /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\|\.codex|\.claude|\.agents|\.ssh|\.aws)/i;
