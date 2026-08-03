@@ -1,0 +1,231 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const checks = [];
+const failures = [];
+
+function record(id, ok, evidence, detail = null) {
+  const result = { id, status: ok ? "pass" : "blocked", evidence, detail };
+  checks.push(result);
+  if (!ok) failures.push({ code: id, message: detail ?? "安全基线未满足" });
+}
+
+function readText(path) {
+  return readFileSync(join(repoRoot, path), "utf8");
+}
+
+function readJson(path) {
+  return JSON.parse(readText(path));
+}
+
+function walk(path) {
+  const absolute = join(repoRoot, path);
+  if (!existsSync(absolute)) return [];
+  const entry = statSync(absolute);
+  if (entry.isFile()) return [path];
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((child) =>
+    walk(join(path, child.name)),
+  );
+}
+
+function normalizedPath(path) {
+  return path.replaceAll("\\", "/");
+}
+
+const rootPackage = readJson("package.json");
+record(
+  "toolchain.node_npm",
+  rootPackage.packageManager === "npm@11.9.0" &&
+    rootPackage.engines?.node === "24.14.0" &&
+    rootPackage.engines?.npm === "11.9.0",
+  "package.json:packageManager+engines",
+  "Node.js 24.14.0 and npm 11.9.0 are required",
+);
+
+const toolchain = readText("rust-toolchain.toml");
+record(
+  "toolchain.rust",
+  /channel\s*=\s*"1\.85\.1"/.test(toolchain) &&
+    /profile\s*=\s*"minimal"/.test(toolchain) &&
+    /rustfmt/.test(toolchain) &&
+    /clippy/.test(toolchain),
+  "rust-toolchain.toml:channel/profile/components",
+  "Rust 1.85.1 minimal toolchain is required",
+);
+
+const cargoLockPath = join(repoRoot, "Cargo.lock");
+const npmLockPath = join(repoRoot, "package-lock.json");
+record(
+  "locks.present",
+  existsSync(cargoLockPath) && existsSync(npmLockPath),
+  "Cargo.lock+package-lock.json",
+  "Both dependency lockfiles must be committed",
+);
+if (existsSync(cargoLockPath)) {
+  record("locks.cargo_version", /version = 4/.test(readText("Cargo.lock")), "Cargo.lock:version");
+}
+if (existsSync(npmLockPath)) {
+  const npmLock = readJson("package-lock.json");
+  record(
+    "locks.npm_version",
+    npmLock.lockfileVersion === 3 && npmLock.packages?.[""],
+    "package-lock.json:lockfileVersion",
+    "npm lockfileVersion 3 is required",
+  );
+}
+
+const fixtureManifest = readJson("fixtures/offline-demo/manifest.json");
+const fixtureBytes = readFileSync(join(repoRoot, "fixtures/offline-demo", fixtureManifest.fixture));
+const fixtureHash = createHash("sha256").update(fixtureBytes).digest("hex");
+record(
+  "fixture.integrity",
+  fixtureManifest.contract === "jzmatrix.offline-demo-manifest" &&
+    fixtureManifest.version === "1.0.0" &&
+    fixtureManifest.data_source === "demo" &&
+    fixtureManifest.network_required === false &&
+    fixtureHash === fixtureManifest.sha256,
+  `fixtures/offline-demo/${fixtureManifest.fixture}:sha256`,
+  "Offline fixture must be fixed, demo-only, and network-free",
+);
+
+const platformManifest = readJson("fixtures/platform-events/manifest.json");
+const platformFixtureEntries = platformManifest.fixtures ?? [];
+const platformFixtureIds = platformFixtureEntries.map((entry) => entry.id).sort();
+const platformFixtureText = platformFixtureEntries
+  .filter(
+    (entry) =>
+      typeof entry.file === "string" &&
+      !entry.file.includes("/") &&
+      !entry.file.includes("\\") &&
+      !entry.file.includes(".."),
+  )
+  .map((entry) => readText(`fixtures/platform-events/${entry.file}`))
+  .join("\n");
+const platformFixtureForbidden =
+  /(?:\/Users\/|\/home\/|[A-Za-z]:\\|\\\\|https?:\/\/|file:\/\/|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|private[_-]?key|client[_-]?secret|transcript|prompt|response|tool[_-]?(?:input|output))/i;
+const platformFixtureHashesMatch = platformFixtureEntries.every((entry) => {
+  if (
+    typeof entry.file !== "string" ||
+    entry.file.includes("/") ||
+    entry.file.includes("\\") ||
+    entry.file.includes("..")
+  ) {
+    return false;
+  }
+  const bytes = readFileSync(join(repoRoot, "fixtures/platform-events", entry.file));
+  return createHash("sha256").update(bytes).digest("hex") === entry.sha256;
+});
+record(
+  "fixture.platform_events_integrity",
+  platformManifest.contract === "jzmatrix.synthetic-platform-fixture-manifest" &&
+    platformManifest.version === "1.0.0" &&
+    platformManifest.parser_version === "1.0.0" &&
+    platformManifest.synthetic === true &&
+    platformManifest.network_required === false &&
+    platformManifest.source_observation === "10A_P0_platform_probe" &&
+    platformManifest.protocol_coverage === "observed_structured_event_categories_only" &&
+    platformFixtureIds.join(",") === "claude-code-synthetic-v1,codex-cli-synthetic-v1" &&
+    platformFixtureEntries.every(
+      (entry) =>
+        entry.platform &&
+        entry.sha256 &&
+        Array.isArray(entry.observed_event_kinds) &&
+        entry.observed_event_kinds.length > 0,
+    ) &&
+    platformFixtureHashesMatch &&
+    !platformFixtureForbidden.test(platformFixtureText),
+  "fixtures/platform-events/manifest.json+fixture sha256",
+  "Synthetic platform fixtures must be embedded, fixed, safe, and network-free",
+);
+
+const sourceFiles = [
+  ...walk("crates").filter(
+    (path) => path.endsWith(".rs") && !normalizedPath(path).includes("/tests/"),
+  ),
+  ...walk("apps/desktop/src").filter((path) => path.endsWith(".ts") || path.endsWith(".css")),
+  ...walk("apps/desktop/src-tauri").filter(
+    (path) =>
+      !normalizedPath(path).startsWith("apps/desktop/src-tauri/gen/") &&
+      (path.endsWith(".rs") || path.endsWith(".json")),
+  ),
+  ...walk("scripts").filter(
+    (path) =>
+      (path.endsWith(".sh") || path.endsWith(".mjs")) &&
+      normalizedPath(path) !== "scripts/verify-p1a.mjs",
+  ),
+];
+const forbiddenLocalReference = /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\|\.codex|\.claude|\.agents|\.ssh|\.aws)/i;
+const localReferenceHits = sourceFiles.flatMap((path) => {
+  const text = readText(path);
+  return forbiddenLocalReference.test(text) ? [path] : [];
+});
+record(
+  "security.no_user_paths",
+  localReferenceHits.length === 0,
+  "implementation source tree",
+  localReferenceHits.length === 0 ? null : `forbidden local references: ${localReferenceHits.join(", ")}`,
+);
+
+const implementationText = sourceFiles
+  .filter((path) => !path.endsWith("tauri.conf.json"))
+  .map((path) => readText(path))
+  .join("\n");
+const networkApiPattern = /\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(|\b(?:reqwest|ureq|hyper)::|std::net::|tokio::net::|Command::new\s*\(/;
+record(
+  "security.no_runtime_network_or_shell",
+  !networkApiPattern.test(implementationText),
+  "Rust core/CLI, Tauri commands, frontend, and scripts",
+  "P1-A runtime source must not open network connections or spawn shell commands",
+);
+
+const tauriConfig = readJson("apps/desktop/src-tauri/tauri.conf.json");
+const csp = tauriConfig.app?.security?.csp ?? "";
+record(
+  "security.tauri_defaults",
+  tauriConfig.app?.withGlobalTauri === false &&
+    tauriConfig.bundle?.createUpdaterArtifacts === false &&
+    tauriConfig.build?.devUrl === "http://localhost:1420" &&
+    csp.includes("default-src 'self'") &&
+    csp.includes("connect-src 'self' ipc: http://ipc.localhost"),
+  "apps/desktop/src-tauri/tauri.conf.json:security/bundle/build",
+  "Tauri must load local resources and keep updater artifacts disabled",
+);
+
+const capabilities = readJson("apps/desktop/src-tauri/capabilities/main.json");
+const permissions = capabilities.permissions ?? [];
+record(
+  "security.capabilities_minimum",
+  permissions.length === 1 && permissions[0] === "core:default" &&
+    !permissions.some((permission) => /(?:shell|sql|updater|http|fs:all|process)/i.test(permission)),
+  "apps/desktop/src-tauri/capabilities/main.json:permissions",
+  "Only the typed core command surface is permitted in P1-A",
+);
+
+const tauriCommands = readText("apps/desktop/src-tauri/src/lib.rs").match(/#\[tauri::command\]/g) ?? [];
+record(
+  "security.typed_command_surface",
+  tauriCommands.length === 2 &&
+    /generate_handler!\[doctor, offline_demo\]/.test(readText("apps/desktop/src-tauri/src/lib.rs")),
+  "apps/desktop/src-tauri/src/lib.rs:commands",
+  "P1-A exposes only doctor and offline_demo",
+);
+
+const result = {
+  contract: "jzmatrix.p1a.verify",
+  version: "1.0.0",
+  ok: failures.length === 0,
+  status: failures.length === 0 ? "pass" : "blocked",
+  checks,
+  errors: failures,
+  boundary: {
+    offline_by_default: true,
+    real_adapters: false,
+    external_agent_writes: false,
+    windows_support_claim: false,
+  },
+};
+console.log(JSON.stringify(result, null, 2));
+process.exitCode = failures.length === 0 ? 0 : 1;

@@ -1,0 +1,59 @@
+name: P1-A verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal --component rustfmt --component clippy
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Verify static P1-A security boundary
+        run: npm run lint
+
+      - name: Typecheck and build frontend
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Verify Rust workspace
+        run: |
+          cargo fmt --check
+          cargo test --workspace --locked
+          cargo check --workspace --locked
+          cargo build --locked -p jzmatrix-cli
+
+      - name: Build unsigned macOS app bundle
+        if: runner.os == 'macOS'
+        run: npm run tauri:build:app
+
+      - name: Build unsigned Windows installer
+        if: runner.os == 'Windows'
+        run: npm run tauri:build

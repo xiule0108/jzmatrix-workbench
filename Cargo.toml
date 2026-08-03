@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "crates/matrix-core",
+  "crates/jzmatrix-cli",
+  "apps/desktop/src-tauri",
+]
+resolver = "2"

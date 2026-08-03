@@ -1,0 +1,25 @@
+{
+  "name": "@jzmatrix/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:app": "tauri build --bundles app"
+  },
+  "dependencies": {
+    "@jzmatrix/protocol": "0.1.0",
+    "@tauri-apps/api": "=2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "=2.0.0",
+    "@types/node": "=22.13.4",
+    "typescript": "=5.7.3",
+    "vite": "=6.1.0"
+  }
+}

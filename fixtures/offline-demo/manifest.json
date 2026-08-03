@@ -1,0 +1,8 @@
+{
+  "contract": "jzmatrix.offline-demo-manifest",
+  "version": "1.0.0",
+  "fixture": "offline-demo.json",
+  "sha256": "ccd03514c58db3a000a1054ea82d9ddccc7f4c657aac3be8d967c31c869b8408",
+  "data_source": "demo",
+  "network_required": false
+}

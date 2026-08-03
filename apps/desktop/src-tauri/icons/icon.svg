@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="JZMatrix Workbench">
+  <rect width="512" height="512" rx="112" fill="#10243e"/>
+  <path d="M128 144h256v72H128zM128 256h256v72H128z" fill="#f4efe5"/>
+  <circle cx="176" cy="400" r="28" fill="#e36b4b"/>
+  <circle cx="256" cy="400" r="28" fill="#e36b4b"/>
+  <circle cx="336" cy="400" r="28" fill="#e36b4b"/>
+</svg>
