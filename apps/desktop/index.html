@@ -3,30 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="JZMatrix Workbench offline-first P1-A shell" />
-    <title>JZMatrix Workbench</title>
+    <meta
+      name="description"
+      content="介子九维协作工作台的离线新手流程与状态边界演示"
+    />
+    <title>介子九维协作工作台 · 演示</title>
   </head>
   <body>
-    <main id="app" aria-live="polite">
-      <p class="eyebrow">JZMatrix Workbench · P1-A</p>
-      <h1>本地协作工作台</h1>
-      <p class="lede">离线演示与本机运行环境诊断已就绪。真实 Agent 接入尚未启用。</p>
-      <section class="panel" aria-labelledby="health-title">
-        <div class="panel-heading">
-          <h2 id="health-title">运行状态</h2>
-          <span id="health-status" class="badge">读取中</span>
-        </div>
-        <div id="health-details" class="details">正在调用共享 Rust doctor…</div>
-      </section>
-      <section class="panel" aria-labelledby="demo-title">
-        <div class="panel-heading">
-          <h2 id="demo-title">离线演示</h2>
-          <span id="demo-status" class="badge">读取中</span>
-        </div>
-        <div id="demo-details" class="details">正在读取随包 fixture…</div>
-      </section>
-      <p class="boundary">P1-A 边界：仅本地、只读探针和离线演示；不创建、不发送、不恢复、不取消外部会话。</p>
-    </main>
+    <main id="app" aria-live="polite"></main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

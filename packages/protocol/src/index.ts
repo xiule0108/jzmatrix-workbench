@@ -18,8 +18,16 @@ export interface DoctorData {
   doctor_version: string;
   observed_at: string;
   checks: DoctorCheck[];
-  summary: Record<"pass" | "degraded" | "blocked" | "unknown" | "not_run", number>;
+  summary: DoctorSummary;
   overall_status: ResponseStatus;
+}
+
+export interface DoctorSummary {
+  pass: number;
+  degraded: number;
+  blocked: number;
+  unknown: number;
+  not_run: number;
 }
 
 export interface CliResponse<T = unknown> {
@@ -39,17 +47,24 @@ export interface CliResponse<T = unknown> {
   extensions: Record<string, unknown>;
 }
 
+export interface OfflineDemoEvent {
+  kind: string;
+  status: string;
+}
+
+export interface OfflineDemoGroup {
+  id: string;
+  goal: string;
+  status: string;
+  roles: string[];
+  events: OfflineDemoEvent[];
+}
+
 export interface OfflineDemo {
   contract: "jzmatrix.offline-demo";
   version: string;
   data_source: "demo";
   title: string;
-  groups: Array<{
-    id: string;
-    goal: string;
-    status: string;
-    roles: string[];
-    events: Array<{ kind: string; status: string }>;
-  }>;
+  groups: OfflineDemoGroup[];
   optional_agent: { status: "not_run"; reason: string };
 }
