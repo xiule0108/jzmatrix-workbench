@@ -22,6 +22,7 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | P1-A Rust/CLI/Tauri scaffold | Available on the construction branch |
 | Offline fixture and doctor | Implemented as a local baseline |
 | Fixed synthetic platform fixture parsing | Implemented for two bundled, manifest-verified fixtures |
+| Offline novice flow | Implemented as a clearly labelled demo; no real tool actions |
 | macOS and Windows packages | Not released; Windows support is not claimed |
 | Real adapters and external writes | Not implemented |
 
@@ -68,7 +69,7 @@ P1-A does not implement real adapters, create/send/resume/cancel actions, existi
 
 JZMatrix Workbench 是一个本地优先的桌面工具和 CLI，用于连接不同 AI 编码工具、建立分工明确的协作组，并准确呈现接单、执行、提交和验收状态。
 
-项目目前处于规划与对抗审查阶段，尚未发布可用安装包。核心规划未通过独立审查前，不进入编码施工。首发目标是 macOS 与 Windows；正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
+核心规划已经通过独立对抗审查，当前仅进入受限 P1-A 工程验证。仓库中的界面只使用明确标注的离线演示数据，CLI 只做本地环境检查和随包合成夹具解析；尚未接入真实工具，也未发布可用安装包。首发目标仍是 macOS 与 Windows，正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
 
 ## License
 
