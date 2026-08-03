@@ -1,0 +1,22 @@
+{
+  "contract": "jzmatrix.offline-demo",
+  "version": "1.0.0",
+  "data_source": "demo",
+  "title": "离线演示",
+  "groups": [
+    {
+      "id": "0190a000-0000-7000-8000-000000000001",
+      "goal": "整理一份可复核的离线工作包",
+      "status": "demo_ready",
+      "roles": ["研究", "复核"],
+      "events": [
+        {"kind": "work_package_prepared", "status": "local_written"},
+        {"kind": "external_send", "status": "not_run"}
+      ]
+    }
+  ],
+  "optional_agent": {
+    "status": "not_run",
+    "reason": "离线演示不需要外部 Agent"
+  }
+}

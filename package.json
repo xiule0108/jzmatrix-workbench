@@ -1,0 +1,24 @@
+{
+  "name": "jzmatrix-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": "24.14.0",
+    "npm": "11.9.0"
+  },
+  "workspaces": [
+    "apps/desktop",
+    "packages/protocol"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @jzmatrix/desktop",
+    "dev": "npm run dev --workspace @jzmatrix/desktop",
+    "typecheck": "npm run typecheck --workspace @jzmatrix/desktop",
+    "lint": "node scripts/verify-p1a.mjs",
+    "test": "node scripts/verify-p1a.mjs",
+    "tauri:dev": "npm run tauri:dev --workspace @jzmatrix/desktop",
+    "tauri:build": "npm run tauri:build --workspace @jzmatrix/desktop",
+    "tauri:build:app": "npm run tauri:build:app --workspace @jzmatrix/desktop"
+  }
+}
