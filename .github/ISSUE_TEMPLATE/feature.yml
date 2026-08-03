@@ -1,0 +1,32 @@
+name: Feature or integration proposal
+description: Propose a user outcome or an officially supported tool integration.
+title: "[Proposal] "
+labels: ["proposal", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the outcome, not only the desired implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: interface
+    attributes:
+      label: Official interface or documentation
+      description: For integrations, link the official API, CLI, protocol, or extension contract.
+    validations:
+      required: true
+  - type: dropdown
+    id: capability
+    attributes:
+      label: Requested capability
+      options: [Task package only, Read-only observation, Create or resume work, Send or receive, Structured receipt and acceptance]
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Permission, privacy, and failure risks
+    validations:
+      required: true

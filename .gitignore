@@ -1,0 +1,17 @@
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+target/
+src-tauri/target/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage/
+artifacts/
