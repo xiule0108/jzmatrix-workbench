@@ -39,3 +39,5 @@ npm run test:security:vite
 ```
 
 The command prints one JSON object with per-case status. A failed Windows prerequisite is a failure, not a skip.
+
+The JSON separates `catalogued_advisories` from `exercised_advisories` and `skipped_advisories`. A non-Windows run therefore never reports a Windows-only skipped case as exercised; the Windows hosted job must exercise the full catalog.

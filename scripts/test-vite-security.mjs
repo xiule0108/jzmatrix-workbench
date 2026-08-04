@@ -85,6 +85,7 @@ const advisoryCoverage = {
   "GHSA-4w7w-66w2-5vf9": "optimized dependencies source-map traversal",
   "GHSA-fx2h-pf6j-xcff": "Windows ADS and 8.3 alternate paths",
   "GHSA-v6wh-96g9-6wx3": "Windows UNC launch-editor NTLM disclosure",
+  "GHSA-67mh-4wv8-2f99": "esbuild development server cross-origin response exposure",
 };
 
 function addResult(id, status, evidence = {}, advisories = []) {
@@ -344,11 +345,15 @@ try {
     return { actual, expected: "6.4.3" };
   });
 
-  await runCase("dependency.esbuild_floor", async () => {
-    const actual = getPackageVersion("esbuild");
-    assert(versionAtLeast(actual, "0.25.0"), `expected esbuild >=0.25.0, found ${actual}`);
-    return { actual, minimum: "0.25.0", advisory: "GHSA-67mh-4wv8-2f99" };
-  });
+  await runCase(
+    "dependency.esbuild_floor",
+    async () => {
+      const actual = getPackageVersion("esbuild");
+      assert(versionAtLeast(actual, "0.25.0"), `expected esbuild >=0.25.0, found ${actual}`);
+      return { actual, minimum: "0.25.0", advisory: "GHSA-67mh-4wv8-2f99" };
+    },
+    { advisories: ["GHSA-67mh-4wv8-2f99"] },
+  );
 
   await runCase("control.safe_resource", async () => {
     const response = await rawRequest(port, "/");
@@ -570,7 +575,17 @@ try {
 
 const failed = cases.filter((entry) => entry.status === "failed");
 const skipped = cases.filter((entry) => entry.status === "skipped");
-const coveredAdvisories = [...new Set(cases.flatMap((entry) => entry.advisories))].sort();
+const cataloguedAdvisories = Object.keys(advisoryCoverage).sort();
+const exercisedAdvisories = [
+  ...new Set(
+    cases
+      .filter((entry) => entry.status !== "skipped")
+      .flatMap((entry) => entry.advisories),
+  ),
+].sort();
+const skippedAdvisories = cataloguedAdvisories.filter(
+  (advisory) => !exercisedAdvisories.includes(advisory),
+);
 const output = {
   contract: CONTRACT,
   version: VERSION,
@@ -580,7 +595,9 @@ const output = {
   loopback_only: true,
   synthetic_canaries_only: true,
   advisory_catalog: advisoryCoverage,
-  covered_advisories: coveredAdvisories,
+  catalogued_advisories: cataloguedAdvisories,
+  exercised_advisories: exercisedAdvisories,
+  skipped_advisories: skippedAdvisories,
   summary: {
     total: cases.length,
     passed: cases.length - failed.length - skipped.length,
