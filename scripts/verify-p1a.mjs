@@ -141,7 +141,7 @@ record(
   "Synthetic platform fixtures must be embedded, fixed, safe, and network-free",
 );
 
-const sourceFiles = [
+const productRuntimeFiles = [
   ...walk("crates").filter(
     (path) => path.endsWith(".rs") && !normalizedPath(path).includes("/tests/"),
   ),
@@ -151,14 +151,18 @@ const sourceFiles = [
       !normalizedPath(path).startsWith("apps/desktop/src-tauri/gen/") &&
       (path.endsWith(".rs") || path.endsWith(".json")),
   ),
-  ...walk("scripts").filter(
-    (path) =>
-      (path.endsWith(".sh") || path.endsWith(".mjs")) &&
-      normalizedPath(path) !== "scripts/verify-p1a.mjs",
-  ),
+];
+const developmentShellScriptFiles = walk("scripts").filter((path) => path.endsWith(".sh"));
+const maintenanceScriptFiles = walk("scripts").filter(
+  (path) => path.endsWith(".mjs") && normalizedPath(path) !== "scripts/verify-p1a.mjs",
+);
+const reviewedSourceFiles = [
+  ...productRuntimeFiles,
+  ...developmentShellScriptFiles,
+  ...maintenanceScriptFiles,
 ];
 const forbiddenLocalReference = /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\|\.codex|\.claude|\.agents|\.ssh|\.aws)/i;
-const localReferenceHits = sourceFiles.flatMap((path) => {
+const localReferenceHits = reviewedSourceFiles.flatMap((path) => {
   const text = readText(path);
   return forbiddenLocalReference.test(text) ? [path] : [];
 });
@@ -169,16 +173,52 @@ record(
   localReferenceHits.length === 0 ? null : `forbidden local references: ${localReferenceHits.join(", ")}`,
 );
 
-const implementationText = sourceFiles
+const productRuntimeText = productRuntimeFiles
   .filter((path) => !path.endsWith("tauri.conf.json"))
   .map((path) => readText(path))
   .join("\n");
-const networkApiPattern = /\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(|\b(?:reqwest|ureq|hyper)::|std::net::|tokio::net::|Command::new\s*\(/;
+const runtimeNetworkOrProcessPattern =
+  /\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(|\b(?:reqwest|ureq|hyper)::|\b(?:std|tokio)::net::|\b(?:std|tokio)::process::Command\b|\bCommand::new\s*\(|\b(?:child_process|node:child_process)\b|\b(?:Bun\.spawn|Deno\.Command)\b/;
 record(
   "security.no_runtime_network_or_shell",
-  !networkApiPattern.test(implementationText),
-  "Rust core/CLI, Tauri commands, frontend, and scripts",
-  "P1-A runtime source must not open network connections or spawn shell commands",
+  !runtimeNetworkOrProcessPattern.test(productRuntimeText),
+  "product runtime only: Rust core/CLI, Tauri runtime, and frontend",
+  "P1-A product runtime must not open network connections or start processes",
+);
+
+const allowedShellCommands = new Map([
+  [
+    "scripts/bootstrap.sh",
+    new Set([
+      "curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \"$rustup_url\" --output \"$temp_dir/rustup-init.sh\"",
+      "sh \"$temp_dir/rustup-init.sh\" -y --profile minimal --default-toolchain \"$rust_version\"",
+    ]),
+  ],
+  [
+    "scripts/doctor.sh",
+    new Set(["exec cargo run --offline --locked -p jzmatrix-cli -- doctor --json"]),
+  ],
+]);
+const riskyShellCommandPattern =
+  /(?:^|[;&|(){}]\s*)\s*(?:(?:if|then|do|else|elif|while|until|!)\s+)*(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+))\s+)*(?:(?:command|builtin|sudo|env)\s+)*(?:[^\s;&|(){}]+\/)?(curl|wget|nc|ncat|ssh|scp|sh|bash|eval|exec)(?=\s|$)/;
+const shellRiskHits = developmentShellScriptFiles.flatMap((path) => {
+  const allowlist = allowedShellCommands.get(normalizedPath(path)) ?? new Set();
+  return readText(path)
+    .split(/\r?\n/u)
+    .flatMap((line, index) => {
+      const trimmed = line.trim();
+      const match = riskyShellCommandPattern.exec(line);
+      if (!match || trimmed.startsWith("#") || allowlist.has(trimmed)) return [];
+      return [`${normalizedPath(path)}:${index + 1}:${match[1]}`];
+    });
+});
+record(
+  "security.dev_scripts_no_unapproved_network_or_shell",
+  shellRiskHits.length === 0,
+  "development shell scripts with path-and-command allowlist",
+  shellRiskHits.length === 0
+    ? null
+    : `unapproved network or command startup: ${shellRiskHits.join(", ")}`,
 );
 
 const tauriConfig = readJson("apps/desktop/src-tauri/tauri.conf.json");

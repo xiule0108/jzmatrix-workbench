@@ -16,6 +16,7 @@
     "dev": "npm run dev --workspace @jzmatrix/desktop",
     "typecheck": "npm run typecheck --workspace @jzmatrix/desktop",
     "lint": "node scripts/verify-p1a.mjs",
+    "self-test:static-boundary": "node scripts/self-test-static-boundary.mjs",
     "test": "node scripts/verify-p1a.mjs",
     "tauri:dev": "npm run tauri:dev --workspace @jzmatrix/desktop",
     "tauri:build": "npm run tauri:build --workspace @jzmatrix/desktop",

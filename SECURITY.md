@@ -18,3 +18,5 @@ Include the affected version or commit, operating system, impact, reproduction s
 - Undocumented private vendor storage is outside the supported integration boundary.
 - Logs and exports must redact credentials, stable personal identifiers, and user-specific absolute paths.
 - Official packages require signatures, hashes, an SBOM, provenance, and a tested recovery path.
+
+P1-A treats product runtime source and development-only shell scripts as separate static-review sets. Product runtime cannot use network or process-start APIs. Development scripts are checked independently; only the exact rustup bootstrap download and execution in `bootstrap.sh`, and the offline Cargo handoff in `doctor.sh`, are allowlisted. These development commands are not product capabilities.
