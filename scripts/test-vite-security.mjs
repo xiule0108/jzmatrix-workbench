@@ -341,7 +341,10 @@ try {
 
   await runCase("control.safe_resource", async () => {
     const response = await rawRequest(port, "/");
-    assert(response.status === 200, `safe control returned HTTP ${response.status}`);
+    assert(
+      response.status === 200,
+      `safe control returned HTTP ${response.status}; body=${JSON.stringify(response.body.slice(0, 500))}`,
+    );
     assert(response.body.includes(safeMarker), "safe control marker was not returned");
     return { http_status: response.status, safe_marker_present: true };
   });
