@@ -245,12 +245,13 @@ record(
 );
 
 const tauriCommands = readText("apps/desktop/src-tauri/src/lib.rs").match(/#\[tauri::command\]/g) ?? [];
+const tauriCommandSurface = readText("apps/desktop/src-tauri/src/lib.rs").replace(/\s/g, "");
 record(
   "security.typed_command_surface",
-  tauriCommands.length === 2 &&
-    /generate_handler!\[doctor, offline_demo\]/.test(readText("apps/desktop/src-tauri/src/lib.rs")),
+  tauriCommands.length === 4 &&
+    tauriCommandSurface.includes("generate_handler![doctor,offline_demo,group_templates,create_group]"),
   "apps/desktop/src-tauri/src/lib.rs:commands",
-  "P1-A exposes only doctor and offline_demo",
+  "M1 exposes only doctor, offline_demo, group_templates, and local create_group",
 );
 
 const result = {

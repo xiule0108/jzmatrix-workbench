@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CliResponse, DoctorData, OfflineDemo, OfflineDemoGroup } from "@jzmatrix/protocol";
+import type {
+  CliResponse,
+  CollaborationGroup,
+  DoctorData,
+  OfflineDemo,
+  OfflineDemoGroup,
+} from "@jzmatrix/protocol";
 import "./styles.css";
 
 type Screen = 1 | 2 | 3;
@@ -30,6 +36,9 @@ interface PageState {
   goal: string;
   template: TemplateId;
   created: boolean;
+  creating: boolean;
+  localGroup: CollaborationGroup | null;
+  idempotencyKey: string;
   formError: string | null;
   evidence: EvidenceId | null;
   runtime: RuntimeInfo;
@@ -79,6 +88,9 @@ const state: PageState = {
   goal: "",
   template: "compact",
   created: false,
+  creating: false,
+  localGroup: null,
+  idempotencyKey: "",
   formError: null,
   evidence: null,
   runtime: {
@@ -221,7 +233,25 @@ function statusTag(label: string, tone: "good" | "notice" | "unknown" | "demo", 
 }
 
 function currentGroup(): OfflineDemoGroup | null {
+  if (state.localGroup) {
+    const local = state.localGroup;
+    const localWritten = local.facts.find((fact) => fact.kind === "local_written");
+    return {
+      id: local.id,
+      goal: local.goal,
+      status: local.status,
+      roles: local.roles.map((role) => role.label),
+      events: [
+        { kind: "work_package_prepared", status: localWritten?.state === "observed" ? "local_written" : "unknown" },
+        { kind: "external_send", status: "not_run" },
+      ],
+    };
+  }
   return state.runtime.demo?.groups[0] ?? null;
+}
+
+function isLocalGroup(): boolean {
+  return state.localGroup !== null;
 }
 
 function selectedTemplate(): (typeof templateOptions)[number] {
@@ -272,13 +302,13 @@ function renderHeader(): string {
         <span class="brand-name">介子九维 <em>协作工作台</em></span>
       </div>
       <div class="header-state" aria-label="当前数据与连接状态">
-        <span class="mode-badge" data-testid="mode-badge"><span class="mode-dot" aria-hidden="true"></span>演示数据</span>
+        <span class="mode-badge" data-testid="mode-badge"><span class="mode-dot" aria-hidden="true"></span>${isLocalGroup() ? "本机记录" : "演示数据"}</span>
         <span class="connection-badge"><span class="status-icon" aria-hidden="true">○</span>尚未确认连接</span>
       </div>
     </header>
     <div class="demo-banner" data-testid="demo-banner" role="status">
-      <span class="banner-mark" aria-hidden="true">示</span>
-      <p><strong>演示数据</strong><span>以下内容是示例，不是你电脑上的真实状态。演示不会打开真实工具，也不会发送消息。</span></p>
+      <span class="banner-mark" aria-hidden="true">${isLocalGroup() ? "本" : "示"}</span>
+      <p><strong>${isLocalGroup() ? "本机记录" : "演示数据"}</strong><span>${isLocalGroup() ? "协作组已写入本机事实源，但不会打开真实工具或发送消息。" : "以下内容是示例，不是你电脑上的真实状态。演示不会打开真实工具，也不会发送消息。"}</span></p>
       ${state.screen === 1 ? "" : '<button class="text-button text-button--light" type="button" data-action="back-to-connect">连接真实工具</button>'}
     </div>
     <nav class="planning-strip" id="planning-strip" aria-label="三步流程">
@@ -372,11 +402,12 @@ function renderTemplateCard(option: (typeof templateOptions)[number]): string {
 function renderScreenTwo(): string {
   const selected = selectedTemplate();
   const canBuild = state.goal.trim().length > 0 && state.runtime.demoStatus === "ready";
+  const localMode = state.runtime.source === "tauri";
   return `
     <section class="screen screen--group" data-testid="screen-group" aria-labelledby="group-title">
       <div class="screen-intro screen-intro--split">
-        <div><p class="screen-kicker">第二步 <span>·</span> 建立协作组</p><h1 id="group-title">用一句话说清楚你要完成什么</h1><p class="intro-copy">工作台先给出一套默认分工。当前只生成演示预览，不创建真实工作窗口。</p></div>
-        <div class="source-stamp"><span class="source-stamp__label">当前来源</span><strong>离线演示</strong><small>${escapeHtml(state.runtime.source === "browser-fallback" ? "浏览器内置回退" : "Rust offline_demo")}</small></div>
+        <div><p class="screen-kicker">第二步 <span>·</span> 建立协作组</p><h1 id="group-title">用一句话说清楚你要完成什么</h1><p class="intro-copy">工作台先给出一套默认分工。${localMode ? "保存到本机事实源，不启动外部工具。" : "当前只生成演示预览，不创建真实工作窗口。"}</p></div>
+        <div class="source-stamp"><span class="source-stamp__label">当前来源</span><strong>${localMode ? "本机事实源" : "离线演示"}</strong><small>${escapeHtml(state.runtime.source === "browser-fallback" ? "浏览器内置回退" : localMode ? "Rust matrix-core" : "Rust offline_demo")}</small></div>
       </div>
       <div class="goal-card">
         <label for="goal-input">协作目标</label>
@@ -388,11 +419,11 @@ function renderScreenTwo(): string {
         ${templateOptions.map(renderTemplateCard).join("")}
       </div>
       <div class="preview-grid">
-        <section class="preview-card preview-card--happens" aria-labelledby="happens-title"><div class="preview-heading"><span class="preview-index">A</span><h2 id="happens-title">将发生</h2></div><ul><li>保存你的目标和协作方式</li><li>生成分工说明与进度页面</li><li>保留演示数据来源和边界说明</li></ul></section>
+        <section class="preview-card preview-card--happens" aria-labelledby="happens-title"><div class="preview-heading"><span class="preview-index">A</span><h2 id="happens-title">将发生</h2></div><ul><li>保存你的目标和协作方式</li><li>生成分工说明与本地事实记录</li><li>为每个状态保留可核对的边界</li></ul></section>
         <section class="preview-card preview-card--not" aria-labelledby="not-title"><div class="preview-heading"><span class="preview-index">B</span><h2 id="not-title">不会发生</h2></div><ul><li>不会把最近有动静标成已完成</li><li>不会创建工具里的真实工作窗口</li><li>不会读取对话正文或发送消息</li></ul></section>
       </div>
       <div class="screen-actions screen-actions--group">
-        <button class="button button--primary" type="button" data-action="build-group" ${canBuild ? "" : "disabled"}><span>建立协作组（演示预览）</span><span aria-hidden="true">→</span></button>
+        <button class="button button--primary" type="button" data-action="build-group" ${canBuild && !state.creating ? "" : "disabled"}><span>${state.creating ? "正在保存…" : localMode ? "保存本地协作组" : "建立协作组（演示预览）"}</span><span aria-hidden="true">→</span></button>
         <button class="button button--quiet" type="button" data-action="go-step" data-step="1">回到连接工具</button>
         <p class="action-caption">${canBuild ? `当前分工：${escapeHtml(selected.label)} · ${escapeHtml(selected.roles)}` : "先写下一句话，按钮就会亮起"}</p>
       </div>
@@ -407,6 +438,8 @@ function roleDisplay(role: string, index: number): string {
 
 function renderMemberCards(group: OfflineDemoGroup): string {
   const roles = group.roles.length > 0 ? group.roles : ["研究", "复核"];
+  const memberSource = isLocalGroup() ? "本机" : "演示";
+  const activitySource = isLocalGroup() ? "本机事实源 · 只说明本地写入" : "演示时间线 · 只说明文件有变化";
   return roles
     .slice(0, 3)
     .map((role, index) => {
@@ -414,9 +447,9 @@ function renderMemberCards(group: OfflineDemoGroup): string {
       const hasActivity = index === 0;
       return `
         <article class="member-card" data-testid="member-card-${index + 1}">
-          <div class="member-top"><span class="member-avatar" aria-hidden="true">${index === 0 ? "资" : "检"}</span><div><h3>${label}</h3><small>分工 ${index + 1}</small></div><span class="member-state">演示</span></div>
+          <div class="member-top"><span class="member-avatar" aria-hidden="true">${index === 0 ? "资" : "检"}</span><div><h3>${label}</h3><small>分工 ${index + 1}</small></div><span class="member-state">${memberSource}</span></div>
           <div class="member-fact"><span>正式进度</span><strong class="fact-unknown">暂时没有可核对的进度记录</strong><button class="inline-evidence" type="button" data-action="open-evidence" data-evidence="progress">查看依据</button></div>
-          <div class="member-fact"><span>最近活动</span><strong>${hasActivity ? "最近有动静" : "尚未看到活动记录"}</strong><small>${hasActivity ? "演示时间线 · 只说明文件有变化" : "没有记录，不代表没有工作"}</small></div>
+          <div class="member-fact"><span>最近活动</span><strong>${hasActivity ? "最近有动静" : "尚未看到活动记录"}</strong><small>${hasActivity ? activitySource : "没有记录，不代表没有工作"}</small></div>
           <p class="member-next"><span aria-hidden="true">↳</span>${hasActivity ? "等待正式进度记录，不能把活动当完成" : "等待可核对的工作状态"}</p>
         </article>`;
     })
@@ -425,6 +458,7 @@ function renderMemberCards(group: OfflineDemoGroup): string {
 
 function renderMessageCard(kind: "local-written" | "delivery"): string {
   const isLocal = kind === "local-written";
+  const localMode = isLocalGroup();
   const label = isLocal ? "协作组工作包说明" : "给独立检查的交接提醒";
   const status = isLocal ? "已写入本机消息记录" : "尚未确认送达";
   const tone = isLocal ? "notice" : "unknown";
@@ -432,16 +466,17 @@ function renderMessageCard(kind: "local-written" | "delivery"): string {
   const internalState = isLocal ? "local_written" : "sent_not_confirmed";
   return `
     <article class="message-card" data-testid="message-${kind}" data-state="${internalState}">
-      <div class="message-top"><span class="message-icon" aria-hidden="true">${isLocal ? "写" : "问"}</span><div><h3>${label}</h3><small>演示消息 · 不联系任何人</small></div>${statusTag(status, tone, icon)}</div>
-      <p class="message-copy">${isLocal ? "目标和分工已留在本机演示记录中。" : "消息没有执行真实发送，因此无法判断对方是否看到。"}</p>
+      <div class="message-top"><span class="message-icon" aria-hidden="true">${isLocal ? "写" : "问"}</span><div><h3>${label}</h3><small>${localMode ? "本机记录 · 不联系任何人" : "演示消息 · 不联系任何人"}</small></div>${statusTag(status, tone, icon)}</div>
+      <p class="message-copy">${isLocal ? localMode ? "目标和分工已写入本机事实源。" : "目标和分工已留在本机演示记录中。" : "消息没有执行真实发送，因此无法判断对方是否看到。"}</p>
       <div class="message-actions"><button class="inline-evidence" type="button" data-action="open-evidence" data-evidence="${kind}">查看依据</button><details class="technical-inline"><summary>技术状态</summary><code>${internalState}</code></details></div>
     </article>`;
 }
 
 function renderProgressRail(): string {
+  const localMode = isLocalGroup();
   const steps = [
-    { title: "目标已保存", detail: "演示页面内", tone: "good", icon: "✓" },
-    { title: "分工已准备", detail: "协作组预览", tone: "good", icon: "✓" },
+    { title: "目标已保存", detail: localMode ? "本机事实源" : "演示页面内", tone: "good", icon: "✓" },
+    { title: "分工已准备", detail: localMode ? "本地协作组" : "协作组预览", tone: "good", icon: "✓" },
     { title: "工具工作窗口", detail: "尚未建立", tone: "unknown", icon: "○" },
     { title: "正式进度", detail: "尚未确认", tone: "unknown", icon: "○" },
     { title: "消息送达", detail: "尚未确认", tone: "unknown", icon: "○" },
@@ -458,11 +493,12 @@ function renderScreenThree(): string {
   const goal = state.goal || group.goal;
   const packageEvent = group.events.find((event) => event.kind === "work_package_prepared");
   const packageIsWritten = packageEvent?.status === "local_written";
+  const localMode = isLocalGroup();
   return `
     <section class="screen screen--progress" data-testid="screen-progress" aria-labelledby="progress-title">
       <div class="screen-intro screen-intro--progress">
         <div><p class="screen-kicker">第三步 <span>·</span> 看进展</p><h1 id="progress-title">看懂现在发生了什么</h1><p class="intro-copy">把最近有动静、正式进度、工作包、工具窗口和消息送达分别看。</p></div>
-        <div class="group-summary"><span class="group-summary__label">当前演示协作组</span><strong>${escapeHtml(goal)}</strong><button class="inline-evidence" type="button" data-action="open-evidence" data-evidence="demo-boundary">为什么是演示？</button></div>
+        <div class="group-summary"><span class="group-summary__label">${localMode ? "当前本地协作组" : "当前演示协作组"}</span><strong>${escapeHtml(goal)}</strong><button class="inline-evidence" type="button" data-action="open-evidence" data-evidence="${localMode ? "package" : "demo-boundary"}">${localMode ? "查看本机依据" : "为什么是演示？"}</button></div>
       </div>
       ${renderProgressRail()}
       <div class="state-strip" aria-label="关键状态分开显示">
@@ -473,14 +509,18 @@ function renderScreenThree(): string {
       </div>
       <div class="progress-layout">
         <section class="panel-section" aria-labelledby="members-title"><div class="section-heading"><div><p class="eyebrow">成员与进度</p><h2 id="members-title">有正式记录才进入进度轨道</h2></div><button class="icon-button" type="button" aria-label="查看正式进度依据" data-action="open-evidence" data-evidence="progress">?</button></div><div class="member-list">${renderMemberCards(group)}</div><p class="boundary-callout"><span aria-hidden="true">!</span><span><strong>最近有动静 ≠ 已完成</strong><br />文件发生变化只能说明有活动，不能代替正式进度记录。</span></p></section>
-        <section class="panel-section" aria-labelledby="messages-title"><div class="section-heading"><div><p class="eyebrow">沟通记录</p><h2 id="messages-title">写入本机，不等于对方收到</h2></div><span class="heading-note">演示消息</span></div><div class="message-list">${renderMessageCard("local-written")}${renderMessageCard("delivery")}</div><div class="send-boundary"><span class="send-boundary__icon" aria-hidden="true">×</span><div><strong>当前不能发送真实消息</strong><p>没有真实连接和送达回执，按钮只提供查看依据或手动交接。</p></div></div></section>
+        <section class="panel-section" aria-labelledby="messages-title"><div class="section-heading"><div><p class="eyebrow">沟通记录</p><h2 id="messages-title">写入本机，不等于对方收到</h2></div><span class="heading-note">${localMode ? "本机事实" : "演示消息"}</span></div><div class="message-list">${renderMessageCard("local-written")}${renderMessageCard("delivery")}</div><div class="send-boundary"><span class="send-boundary__icon" aria-hidden="true">×</span><div><strong>当前不能发送真实消息</strong><p>没有真实连接和送达回执，按钮只提供查看依据或手动交接。</p></div></div></section>
       </div>
-      <div class="progress-actions"><button class="button button--muted" type="button" disabled>演示不会打开真实工具</button><button class="button button--outline" type="button" data-action="replay-demo">重播演示状态</button><button class="button button--quiet" type="button" data-action="back-to-connect">连接真实工具</button></div>
+      <div class="progress-actions"><button class="button button--muted" type="button" disabled>${localMode ? "本机记录不会打开真实工具" : "演示不会打开真实工具"}</button><button class="button button--outline" type="button" data-action="replay-demo">${localMode ? "重新查看本地状态" : "重播演示状态"}</button><button class="button button--quiet" type="button" data-action="back-to-connect">连接真实工具</button></div>
     </section>`;
 }
 
 function renderTechnicalDetails(): string {
-  const source = state.runtime.source === "browser-fallback" ? "浏览器内置演示回退" : "Rust offline_demo 命令返回";
+  const source = isLocalGroup()
+    ? "Rust matrix-core 写入的本机 SQLite 事实源"
+    : state.runtime.source === "browser-fallback"
+      ? "浏览器内置演示回退"
+      : "Rust offline_demo 命令返回";
   return `
     <details class="technical-details">
       <summary><span>查看连接与技术详情</span><small>默认折叠，不会改变当前状态</small></summary>
@@ -488,7 +528,7 @@ function renderTechnicalDetails(): string {
         <p class="technical-lede">这里的信息用于排查连接问题。它不会改变协作组分工，也不会自动开放新的权限。</p>
         <dl class="technical-list">
           <div><dt>页面数据来源</dt><dd>${source}</dd></div>
-          <div><dt>离线 fixture</dt><dd>offline-demo · data_source=demo · network_required=false</dd></div>
+          <div><dt>离线 fixture</dt><dd>${isLocalGroup() ? "local-group · 仅本机 SQLite · network=false" : "offline-demo · data_source=demo · network_required=false"}</dd></div>
           <div><dt>本地运行基线</dt><dd>${escapeHtml(state.runtime.doctorStatus)} · ${escapeHtml(state.runtime.doctorSummary)}</dd></div>
           <div><dt>观察时间</dt><dd>${escapeHtml(observedLabel())}</dd></div>
         </dl>
@@ -515,7 +555,7 @@ function renderEvidenceDrawer(): string {
 
 function render(): void {
   const screen = state.screen === 1 ? renderScreenOne() : state.screen === 2 ? renderScreenTwo() : renderScreenThree();
-  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>P1-A 离线演示边界</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
+  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>${isLocalGroup() ? "M1 本机事实源" : "P1-A 离线演示边界"}</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
   updateGroupButton();
   if (state.evidence) {
     requestAnimationFrame(() => app.querySelector<HTMLButtonElement>(".drawer-close")?.focus());
@@ -524,7 +564,7 @@ function render(): void {
 
 function updateGroupButton(): void {
   const button = app.querySelector<HTMLButtonElement>('[data-action="build-group"]');
-  if (button) button.disabled = state.goal.trim().length === 0 || state.runtime.demoStatus !== "ready";
+  if (button) button.disabled = state.goal.trim().length === 0 || state.runtime.demoStatus !== "ready" || state.creating;
   const count = app.querySelector<HTMLElement>("#goal-count");
   if (count) count.textContent = `${state.goal.length}/120`;
 }
@@ -534,6 +574,9 @@ function enterDemo(): void {
   if (!group || state.runtime.demoStatus !== "ready") return;
   state.screen = 2;
   state.created = false;
+  state.creating = false;
+  state.localGroup = null;
+  state.idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `group-${Date.now()}`;
   state.formError = null;
   if (!state.goal) state.goal = group.goal;
   state.evidence = null;
@@ -541,7 +584,7 @@ function enterDemo(): void {
   requestAnimationFrame(() => app.querySelector<HTMLTextAreaElement>("#goal-input")?.focus());
 }
 
-function buildGroup(): void {
+async function buildGroup(): Promise<void> {
   if (!state.goal.trim()) {
     state.formError = "先写下你要完成的事，一句话就可以。";
     render();
@@ -550,6 +593,30 @@ function buildGroup(): void {
   }
   if (!state.runtime.demo) return;
   state.formError = null;
+  if (hasTauri) {
+    state.creating = true;
+    render();
+    try {
+      const response = await invoke<CliResponse<CollaborationGroup>>("create_group", {
+        goal: state.goal,
+        templateId: state.template,
+        idempotencyKey: state.idempotencyKey,
+      });
+      if (!response.ok || !response.data) {
+        state.formError = response.errors[0]?.message ?? "本机事实源没有接受这个协作组";
+        state.creating = false;
+        render();
+        return;
+      }
+      state.localGroup = response.data;
+    } catch {
+      state.formError = "暂时没能保存本机事实源，请稍后重试。";
+      state.creating = false;
+      render();
+      return;
+    }
+  }
+  state.creating = false;
   state.created = true;
   state.screen = 3;
   state.evidence = null;
@@ -575,19 +642,27 @@ function openEvidence(id: EvidenceId): void {
 function goToStep(step: Screen): void {
   if (step === 3 && !state.created) return;
   if (step === 2 && state.runtime.demoStatus !== "ready") return;
+  if (step === 2 && state.created) {
+    state.created = false;
+    state.localGroup = null;
+    state.idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `group-${Date.now()}`;
+  }
+  if (step === 2 && !state.idempotencyKey) {
+    state.idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `group-${Date.now()}`;
+  }
   state.screen = step;
   state.evidence = null;
   render();
 }
 
-function handleAction(element: HTMLElement): void {
+async function handleAction(element: HTMLElement): Promise<void> {
   const action = element.dataset.action;
   switch (action) {
     case "enter-demo":
       enterDemo();
       break;
     case "build-group":
-      buildGroup();
+      await buildGroup();
       break;
     case "open-evidence":
       openEvidence((element.dataset.evidence ?? "demo-boundary") as EvidenceId);
@@ -619,7 +694,7 @@ app.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   const actionElement = target.closest<HTMLElement>("[data-action]");
-  if (actionElement) handleAction(actionElement);
+  if (actionElement) void handleAction(actionElement);
 });
 
 app.addEventListener("input", (event) => {
