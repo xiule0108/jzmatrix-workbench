@@ -46,14 +46,24 @@ record(
 );
 
 const toolchain = readText("rust-toolchain.toml");
+const rustManifests = [
+  "apps/desktop/src-tauri/Cargo.toml",
+  "crates/jzmatrix-cli/Cargo.toml",
+  "crates/matrix-core/Cargo.toml",
+];
+const bootstrap = readText("scripts/bootstrap.sh");
+const verifyWorkflow = readText(".github/workflows/verify.yml");
 record(
   "toolchain.rust",
-  /channel\s*=\s*"1\.85\.1"/.test(toolchain) &&
+  /channel\s*=\s*"1\.88\.0"/.test(toolchain) &&
     /profile\s*=\s*"minimal"/.test(toolchain) &&
     /rustfmt/.test(toolchain) &&
-    /clippy/.test(toolchain),
-  "rust-toolchain.toml:channel/profile/components",
-  "Rust 1.85.1 minimal toolchain is required",
+    /clippy/.test(toolchain) &&
+    rustManifests.every((path) => /rust-version\s*=\s*"1\.88\.0"/.test(readText(path))) &&
+    /rust_version="1\.88\.0"/.test(bootstrap) &&
+    /rustup toolchain install 1\.88\.0/.test(verifyWorkflow),
+  "rust-toolchain.toml+workspace Cargo.toml files+bootstrap+verify workflow",
+  "Rust 1.88.0 must be synchronized across the minimal toolchain, workspace crates, bootstrap, and CI",
 );
 
 const cargoLockPath = join(repoRoot, "Cargo.lock");

@@ -30,7 +30,7 @@ See the [roadmap](docs/ROADMAP.md), [governance](GOVERNANCE.md), and [review pol
 
 ## Local development
 
-The macOS bootstrap requires Node.js 24.14.0 and npm 11.9.0. It can install the pinned Rust 1.85.1 toolchain into the user-level rustup location with no `sudo`.
+The macOS bootstrap requires Node.js 24.14.0 and npm 11.9.0. It can install the pinned Rust 1.88.0 toolchain into the user-level rustup location with no `sudo`.
 
 ```sh
 ./scripts/bootstrap.sh --install-rust

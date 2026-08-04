@@ -30,7 +30,7 @@ jobs:
       - name: Install Rust toolchain
         shell: bash
         run: |
-          rustup toolchain install 1.85.1 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt --component clippy
 
       - name: Install JavaScript dependencies
         run: npm ci
