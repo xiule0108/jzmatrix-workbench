@@ -5,6 +5,8 @@ import type {
   DoctorData,
   OfflineDemo,
   OfflineDemoGroup,
+  ToolDiscoveryResult,
+  ToolDiscoverySnapshot,
 } from "@jzmatrix/protocol";
 import "./styles.css";
 
@@ -39,6 +41,9 @@ interface PageState {
   creating: boolean;
   localGroup: CollaborationGroup | null;
   idempotencyKey: string;
+  discovering: boolean;
+  toolDiscovery: ToolDiscoverySnapshot | null;
+  discoveryError: string | null;
   formError: string | null;
   evidence: EvidenceId | null;
   runtime: RuntimeInfo;
@@ -91,6 +96,9 @@ const state: PageState = {
   creating: false,
   localGroup: null,
   idempotencyKey: "",
+  discovering: false,
+  toolDiscovery: null,
+  discoveryError: null,
   formError: null,
   evidence: null,
   runtime: {
@@ -112,11 +120,11 @@ const evidenceRecords: Record<EvidenceId, EvidenceRecord> = {
   connect: {
     title: "工具连接能力",
     status: "未检查 / 只读能力待确认",
-    source: "本批次页面状态与 P1-A 运行边界",
-    observed: "演示时间线；没有执行工具探针",
-    canConfirm: "页面可以说明首发只读范围和当前未确认状态",
-    cannotConfirm: "不能确认工具是否能建立工作窗口，也不能确认发送能力",
-    next: "在后续受控能力确认前，使用演示或工作包交接",
+    source: "Mac-M2 固定工具白名单与用户触发探针",
+    observed: "未点击“检查 Mac 工具”前不读取本机；点击后只保存版本摘要、能力标记和不可用原因",
+    canConfirm: "可以确认某个具名二进制是否能在限定时间内返回 --version/--help",
+    cannotConfirm: "不能确认工具能建立工作窗口、读取会话、发送消息或完成任务",
+    next: "先查看能力快照，再在后续独立 Gate 中讨论真实只读适配器",
   },
   package: {
     title: "协作组工作包",
@@ -215,6 +223,24 @@ const templateOptions: Array<{
   },
 ];
 
+const toolCatalog: Array<{
+  id: string;
+  name: string;
+  description: string;
+  scope: string;
+}> = [
+  { id: "codex_cli", name: "Codex CLI", description: "OpenAI 的本地编码助手命令行", scope: "只检查可执行文件和帮助信息" },
+  { id: "claude_code_cli", name: "Claude Code", description: "Anthropic 的本地编码助手命令行", scope: "只检查可执行文件和帮助信息" },
+  { id: "cursor_agent", name: "Cursor Agent", description: "Cursor 的命令行 Agent 入口", scope: "只检查本机 CLI，不连接后台任务" },
+  { id: "copilot_cli", name: "GitHub Copilot CLI", description: "GitHub Copilot 的命令行入口", scope: "只检查本机 CLI，不读取远程会话" },
+  { id: "zed", name: "Zed", description: "Zed 编辑器命令行入口", scope: "只检查命令行入口，不打开编辑器" },
+  { id: "zcode", name: "ZCode", description: "Z.AI ZCode 桌面入口", scope: "只检查命令行入口，不读取桌面会话" },
+  { id: "vscode", name: "VS Code", description: "VS Code 命令行入口", scope: "只检查编辑器 CLI，不读取 Copilot 会话" },
+  { id: "opencode", name: "OpenCode", description: "OpenCode 命令行与 ACP 样本", scope: "只检查 CLI，不启动 HTTP 或 ACP 服务" },
+  { id: "cline", name: "Cline", description: "Cline 命令行与 ACP 样本", scope: "只检查 CLI，不创建任务或 ACP 会话" },
+  { id: "aider", name: "Aider", description: "Aider 命令行对照工具", scope: "只检查 CLI，不读取历史或修改 Git" },
+];
+
 function escapeHtml(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {
@@ -303,7 +329,7 @@ function renderHeader(): string {
       </div>
       <div class="header-state" aria-label="当前数据与连接状态">
         <span class="mode-badge" data-testid="mode-badge"><span class="mode-dot" aria-hidden="true"></span>${isLocalGroup() ? "本机记录" : "演示数据"}</span>
-        <span class="connection-badge"><span class="status-icon" aria-hidden="true">○</span>尚未确认连接</span>
+        <span class="connection-badge"><span class="status-icon" aria-hidden="true">○</span>${toolDiscoverySummary()}</span>
       </div>
     </header>
     <div class="demo-banner" data-testid="demo-banner" role="status">
@@ -327,20 +353,36 @@ function renderHeader(): string {
     </nav>`;
 }
 
-function renderScreenOne(): string {
-  const tools = [
-    {
-      name: "Codex",
-      description: "在本机工作的开发助手",
-      scope: "项目位置和最近活动可见；任务名称与正式进度需要单独确认。",
-    },
-    {
-      name: "Claude Code",
-      description: "在本机工作的开发助手",
-      scope: "可以尝试读取工作状态；对话正文与发送能力不在本批次范围。",
-    },
-  ];
+function discoveryResult(id: string): ToolDiscoveryResult | null {
+  return state.toolDiscovery?.tools.find((tool) => tool.id === id) ?? null;
+}
 
+function discoveryStatus(result: ToolDiscoveryResult | null): { label: string; tone: "good" | "notice" | "unknown"; icon: string } {
+  if (!result) return { label: "未检查", tone: "unknown", icon: "○" };
+  if (result.status === "available" && result.help_status === "pass") {
+    return { label: result.version ? `可用 · ${result.version}` : "可用 · 版本未解析", tone: "good", icon: "✓" };
+  }
+  if (result.status === "available") return { label: "已找到 · 能力未完整确认", tone: "notice", icon: "!" };
+  if (result.status === "not_found") return { label: "未找到", tone: "unknown", icon: "○" };
+  if (result.status === "timed_out") return { label: "检查超时", tone: "unknown", icon: "!" };
+  return { label: "检查受限", tone: "unknown", icon: "!" };
+}
+
+function renderDiscoveryStatus(id: string): string {
+  const status = discoveryStatus(discoveryResult(id));
+  return statusTag(status.label, status.tone, status.icon);
+}
+
+function toolDiscoverySummary(): string {
+  if (state.discovering) return "正在检查本机工具";
+  if (state.toolDiscovery) {
+    const available = state.toolDiscovery.tools.filter((tool) => tool.status === "available").length;
+    return `已检查 ${available}/${state.toolDiscovery.tools.length} 个入口`;
+  }
+  return "尚未确认连接";
+}
+
+function renderScreenOne(): string {
   return `
     <section class="screen screen--connect" data-testid="screen-connect" aria-labelledby="connect-title">
       <div class="screen-intro">
@@ -351,8 +393,8 @@ function renderScreenOne(): string {
       <div class="notice-card notice-card--quiet">
         <span class="notice-symbol" aria-hidden="true">只</span>
         <div>
-          <strong>首发只读</strong>
-          <p>本批次不执行工具探针。连接状态先显示为“未检查 / 只读能力待确认”，这不是失败，也不代表已有创建权限。</p>
+          <strong>只检查本机入口</strong>
+          <p>点击后只对固定白名单二进制执行 <code>--version</code> 和 <code>--help</code>。不会读取配置、会话正文或凭据，也不会启动 Agent 任务。</p>
         </div>
         <button class="icon-button" type="button" aria-label="查看连接依据" data-action="open-evidence" data-evidence="connect">?</button>
       </div>
@@ -363,26 +405,28 @@ function renderScreenOne(): string {
       </div>
       <div class="section-heading">
         <div><p class="eyebrow">可选工具</p><h2>先看清每个工具能提供什么</h2></div>
-        <span class="heading-note">能力待确认</span>
+        <span class="heading-note">${toolDiscoverySummary()}</span>
       </div>
       <div class="tool-list">
-        ${tools
+        ${toolCatalog
           .map(
             (tool, index) => `
               <article class="tool-card" data-testid="tool-card-${index + 1}">
-                <div class="tool-logo" aria-hidden="true">${index === 0 ? "C" : "Cl"}</div>
+                <div class="tool-logo" aria-hidden="true">${tool.name.slice(0, index < 2 ? 2 : 1)}</div>
                 <div class="tool-main">
-                  <div class="tool-title-row"><h3>${tool.name}</h3>${statusTag("未检查", "unknown", "○")}</div>
+                  <div class="tool-title-row"><h3>${tool.name}</h3>${renderDiscoveryStatus(tool.id)}</div>
                   <p class="tool-description">${tool.description}</p>
                   <p class="tool-scope"><span>可见范围</span>${tool.scope}</p>
                 </div>
-                <button class="button button--outline button--small" type="button" disabled aria-label="${tool.name}只读能力待确认">只读能力待确认</button>
+                <span class="tool-binary">${tool.id}</span>
               </article>`,
           )
           .join("")}
       </div>
-      <p class="under-card-note"><span aria-hidden="true">↳</span>开发预览不会执行工具探针。你可以先用演示数据熟悉完整流程。</p>
+      ${state.discoveryError ? `<p class="input-error" role="alert">${escapeHtml(state.discoveryError)}</p>` : ""}
+      <p class="under-card-note"><span aria-hidden="true">↳</span>${hasTauri ? "检查只在你点击后发生；结果只保留版本摘要、能力标记和不可用原因。" : "浏览器开发预览不会读取本机；请在 Mac 桌面壳中点击检查。"}</p>
       <div class="screen-actions screen-actions--connect">
+        <button class="button button--outline" type="button" data-action="discover-tools" ${hasTauri && !state.discovering ? "" : "disabled"}><span>${state.discovering ? "正在检查…" : "检查 Mac 工具"}</span><span aria-hidden="true">⌕</span></button>
         <button class="button button--primary" type="button" data-action="enter-demo"><span>先看一个演示</span><span aria-hidden="true">↗</span></button>
         <button class="button button--quiet" type="button" data-action="open-evidence" data-evidence="demo-boundary">查看演示边界</button>
       </div>
@@ -529,6 +573,7 @@ function renderTechnicalDetails(): string {
         <dl class="technical-list">
           <div><dt>页面数据来源</dt><dd>${source}</dd></div>
           <div><dt>离线 fixture</dt><dd>${isLocalGroup() ? "local-group · 仅本机 SQLite · network=false" : "offline-demo · data_source=demo · network_required=false"}</dd></div>
+          <div><dt>工具发现</dt><dd>${state.toolDiscovery ? `real · user_triggered · ${state.toolDiscovery.tools.filter((tool) => tool.status === "available").length}/${state.toolDiscovery.tools.length} 个入口可用` : "not_run · 不读取本机"}</dd></div>
           <div><dt>本地运行基线</dt><dd>${escapeHtml(state.runtime.doctorStatus)} · ${escapeHtml(state.runtime.doctorSummary)}</dd></div>
           <div><dt>观察时间</dt><dd>${escapeHtml(observedLabel())}</dd></div>
         </dl>
@@ -555,7 +600,7 @@ function renderEvidenceDrawer(): string {
 
 function render(): void {
   const screen = state.screen === 1 ? renderScreenOne() : state.screen === 2 ? renderScreenTwo() : renderScreenThree();
-  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>${isLocalGroup() ? "M1 本机事实源" : "P1-A 离线演示边界"}</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
+  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>${isLocalGroup() ? "M1 本机事实源" : state.toolDiscovery ? "M2 本机能力快照" : "P1-A 离线演示边界"}</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
   updateGroupButton();
   if (state.evidence) {
     requestAnimationFrame(() => app.querySelector<HTMLButtonElement>(".drawer-close")?.focus());
@@ -623,6 +668,25 @@ async function buildGroup(): Promise<void> {
   render();
 }
 
+async function discoverTools(): Promise<void> {
+  if (!hasTauri || state.discovering) return;
+  state.discoveryError = null;
+  state.discovering = true;
+  render();
+  try {
+    const response = await invoke<CliResponse<ToolDiscoverySnapshot>>("discover_tools");
+    if (!response.ok || !response.data) {
+      state.discoveryError = response.errors[0]?.message ?? "本机工具检查未完成。";
+    } else {
+      state.toolDiscovery = response.data;
+    }
+  } catch {
+    state.discoveryError = "暂时没能读取本机工具入口；页面没有启动任何任务。";
+  }
+  state.discovering = false;
+  render();
+}
+
 function closeEvidence(): void {
   state.evidence = null;
   render();
@@ -663,6 +727,9 @@ async function handleAction(element: HTMLElement): Promise<void> {
       break;
     case "build-group":
       await buildGroup();
+      break;
+    case "discover-tools":
+      await discoverTools();
       break;
     case "open-evidence":
       openEvidence((element.dataset.evidence ?? "demo-boundary") as EvidenceId);

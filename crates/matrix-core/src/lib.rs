@@ -14,8 +14,16 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod tool_discovery;
+
+pub use tool_discovery::{
+    builtin_tool_catalog, discover_local_tools, ToolCatalogEntry, ToolDiscoveryResult,
+    ToolDiscoverySnapshot,
+};
+
 const INITIAL_MIGRATION_SQL: &str = include_str!("../migrations/0001_initial.sql");
 const LOCAL_GROUPS_MIGRATION_SQL: &str = include_str!("../migrations/0002_local_groups.sql");
+const TOOL_DISCOVERY_MIGRATION_SQL: &str = tool_discovery::MIGRATION_SQL;
 const OFFLINE_DEMO_MANIFEST: &str = include_str!("../../../fixtures/offline-demo/manifest.json");
 const OFFLINE_DEMO_JSON: &str = include_str!("../../../fixtures/offline-demo/offline-demo.json");
 const PLATFORM_FIXTURE_MANIFEST: &str =
@@ -875,8 +883,10 @@ pub fn ensure_schema(db_path: &Path) -> Result<(), CoreError> {
     )?;
     transaction.commit()?;
 
-    for (version, name, migration_sql) in [(2_i64, "0002_local_groups", LOCAL_GROUPS_MIGRATION_SQL)]
-    {
+    for (version, name, migration_sql) in [
+        (2_i64, "0002_local_groups", LOCAL_GROUPS_MIGRATION_SQL),
+        (3_i64, "0003_tool_discovery", TOOL_DISCOVERY_MIGRATION_SQL),
+    ] {
         let expected_checksum = sha256_hex(migration_sql.as_bytes());
         let applied: Option<(String, String)> = connection
             .query_row(
@@ -1631,7 +1641,7 @@ mod tests {
                 row.get(0)
             })
             .expect("migration count");
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
         assert!(db
             .parent()
             .expect("database parent")
@@ -1671,6 +1681,18 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("app.sqlite3.before-migration-v0002-")));
+        assert!(fs::read_dir(
+            pre_migration_db
+                .parent()
+                .expect("pre-migration parent")
+                .join("backups")
+        )
+        .expect("read second migration backups")
+        .filter_map(Result::ok)
+        .any(|entry| entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("app.sqlite3.before-migration-v0003-")));
     }
 
     #[test]

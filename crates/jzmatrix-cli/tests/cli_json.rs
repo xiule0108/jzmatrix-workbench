@@ -168,3 +168,23 @@ fn local_group_create_is_idempotent_and_does_not_start_tools() {
     assert_eq!(conflict_json["errors"][0]["code"], "idempotency_conflict");
     assert!(!String::from_utf8_lossy(&conflict.stdout).contains("另一件事"));
 }
+
+#[test]
+fn tool_catalog_is_fixed_and_does_not_probe_the_machine() {
+    let output = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .args(["tools", "catalog", "--json"])
+        .output()
+        .expect("read tool catalog");
+    assert!(output.status.success());
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("catalog output must be JSON");
+    assert_eq!(response["command"], "tools.catalog");
+    assert_eq!(response["data"]["probe"], "not_run");
+    let catalog = response["data"]["catalog"]
+        .as_array()
+        .expect("catalog array");
+    assert_eq!(catalog.len(), 10);
+    assert!(catalog.iter().any(|entry| entry["id"] == "codex_cli"));
+    assert!(catalog.iter().any(|entry| entry["id"] == "claude_code_cli"));
+    assert_eq!(response["extensions"]["external_processes"], false);
+}

@@ -174,7 +174,11 @@ record(
 );
 
 const productRuntimeText = productRuntimeFiles
-  .filter((path) => !path.endsWith("tauri.conf.json"))
+  .filter(
+    (path) =>
+      !path.endsWith("tauri.conf.json") &&
+      normalizedPath(path) !== "crates/matrix-core/src/tool_discovery.rs",
+  )
   .map((path) => readText(path))
   .join("\n");
 const runtimeNetworkOrProcessPattern =
@@ -184,6 +188,31 @@ record(
   !runtimeNetworkOrProcessPattern.test(productRuntimeText),
   "product runtime only: Rust core/CLI, Tauri runtime, and frontend",
   "P1-A product runtime must not open network connections or start processes",
+);
+
+const toolDiscoveryText = readText("crates/matrix-core/src/tool_discovery.rs");
+const allowedDiscoveryBinaries = [
+  "codex",
+  "claude",
+  "cursor-agent",
+  "copilot",
+  "zed",
+  "zcode",
+  "code",
+  "opencode",
+  "cline",
+  "aider",
+];
+record(
+  "security.tool_discovery_allowlist",
+  toolDiscoveryText.includes("const ALLOWED_TOOL_SPECS") &&
+    allowedDiscoveryBinaries.every((binary) => toolDiscoveryText.includes(`binary: "${binary}"`)) &&
+    toolDiscoveryText.includes('run_probe(&path, "--version")') &&
+    toolDiscoveryText.includes('run_probe(&path, "--help")') &&
+    !/Command::new\(\s*"(?:sh|bash|zsh|fish|cmd|powershell|pwsh)"\s*\)/.test(toolDiscoveryText) &&
+    !/\b(?:std::env::args|std::env::args_os)\s*\(/.test(toolDiscoveryText),
+  "crates/matrix-core/src/tool_discovery.rs:fixed binary and argument allowlist",
+  "M2 permits only user-triggered --version/--help probes for ten named binaries",
 );
 
 const allowedShellCommands = new Map([
@@ -248,10 +277,10 @@ const tauriCommands = readText("apps/desktop/src-tauri/src/lib.rs").match(/#\[ta
 const tauriCommandSurface = readText("apps/desktop/src-tauri/src/lib.rs").replace(/\s/g, "");
 record(
   "security.typed_command_surface",
-  tauriCommands.length === 4 &&
-    tauriCommandSurface.includes("generate_handler![doctor,offline_demo,group_templates,create_group]"),
+  tauriCommands.length === 5 &&
+    tauriCommandSurface.includes("generate_handler![doctor,offline_demo,group_templates,create_group,discover_tools]"),
   "apps/desktop/src-tauri/src/lib.rs:commands",
-  "M1 exposes only doctor, offline_demo, group_templates, and local create_group",
+  "M2 exposes only doctor, offline_demo, group_templates, local create_group, and allowlisted discover_tools",
 );
 
 const result = {
@@ -265,6 +294,7 @@ const result = {
     offline_by_default: true,
     real_adapters: false,
     external_agent_writes: false,
+    external_processes: "allowlisted_user_triggered_only",
     windows_support_claim: false,
   },
 };

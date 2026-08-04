@@ -23,7 +23,8 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | Offline fixture and doctor | Implemented as a local baseline |
 | Fixed synthetic platform fixture parsing | Implemented for two bundled, manifest-verified fixtures |
 | Offline novice flow | Implemented as a clearly labelled demo; no real tool actions |
-| Mac-M1 local facts and one-click groups | Implemented on the Mac-M1 branch; local-only PR validation pending |
+| Mac-M1 local facts and one-click groups | Implemented on `main`; local-only and not an external tool action |
+| Mac-M2 allowlisted tool discovery | Implemented as a user-triggered version/help snapshot; no sessions or tasks are opened |
 | macOS package | Not released; the current line is macOS-only |
 | Windows package | Deferred; no current Windows support or release claim |
 | Real adapters and external writes | Not implemented |
@@ -44,7 +45,21 @@ npm run tauri:dev
 npm run tauri:build:app
 ```
 
-The first command is only needed when the pinned Rust toolchain is not already available. `scripts/doctor.sh` deliberately uses Cargo offline and therefore reports a blocked toolchain if dependencies have not been bootstrapped. The app loads only bundled resources and exposes `doctor`, `offline_demo`, and the local-only M1 group commands in the construction branch.
+The first command is only needed when the pinned Rust toolchain is not already available. `scripts/doctor.sh` deliberately uses Cargo offline and therefore reports a blocked toolchain if dependencies have not been bootstrapped. The app loads only bundled resources and exposes `doctor`, `offline_demo`, local-only M1 group commands, and the user-triggered M2 allowlisted discovery command.
+
+To inspect the static catalog without probing the machine:
+
+```sh
+cargo run --offline --locked -p jzmatrix-cli -- tools catalog --json
+```
+
+To perform the explicit Mac-only discovery action, which runs only `--version` and `--help` for the ten named binaries and stores a redacted local snapshot:
+
+```sh
+cargo run --offline --locked -p jzmatrix-cli -- tools discover --json
+```
+
+The discovery result does not read `~/.codex`, `~/.claude`, session bodies, credentials, or arbitrary paths. An available binary is not a connected Agent and does not grant create, send, resume, cancel, delivery, acceptance, or completion evidence.
 
 ### Fixed synthetic platform fixture parsing
 
@@ -71,7 +86,7 @@ P1-A does not implement real adapters, create/send/resume/cancel actions, existi
 
 JZMatrix Workbench 是一个本地优先的桌面工具和 CLI，用于连接不同 AI 编码工具、建立分工明确的协作组，并准确呈现接单、执行、提交和验收状态。
 
-核心规划已经通过前序独立审查，当前施工范围根据用户裁定切换为 macOS-only。仓库中的界面在显式保存本地协作组之前只使用明确标注的离线演示数据；Mac-M1 增加本地 SQLite 事实源和一键建组，但不会启动工具或发送消息。尚未接入真实工具，也未发布可用安装包。Windows 仍是终局目标，但在 Mac 版本达到公开 Beta 前冻结，不构成当前支持声明。正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
+核心规划已经通过前序独立审查，当前施工范围根据用户裁定切换为 macOS-only。仓库中的界面在显式保存本地协作组之前只使用明确标注的离线演示数据；Mac-M1 增加本地 SQLite 事实源和一键建组，Mac-M2 增加用户显式触发的白名单版本与帮助快照，但两个切片都不会启动 Agent 任务或发送消息。尚未接入真实工具，也未发布可用安装包。Windows 仍是终局目标，但在 Mac 版本达到公开 Beta 前冻结，不构成当前支持声明。正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
 
 ## License
 
