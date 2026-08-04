@@ -215,6 +215,18 @@ record(
   "M2 permits only user-triggered --version/--help probes for ten named binaries",
 );
 
+const dryRunText = readText("crates/matrix-core/src/dry_run.rs");
+record(
+  "security.dry_run_no_execution",
+  dryRunText.includes('execution: "not_authorized"') &&
+    ["create", "send", "resume", "cancel"].every((operation) =>
+      dryRunText.includes(`id: "${operation}"`),
+    ) &&
+    !/\b(?:std::process::Command|tokio::process::Command|Command::new\s*\()/.test(dryRunText),
+  "crates/matrix-core/src/dry_run.rs:plan-only execution boundary",
+  "M4 plans create/send/resume/cancel but cannot start processes or authorize external writes",
+);
+
 const allowedShellCommands = new Map([
   [
     "scripts/bootstrap.sh",
@@ -277,10 +289,12 @@ const tauriCommands = readText("apps/desktop/src-tauri/src/lib.rs").match(/#\[ta
 const tauriCommandSurface = readText("apps/desktop/src-tauri/src/lib.rs").replace(/\s/g, "");
 record(
   "security.typed_command_surface",
-  tauriCommands.length === 5 &&
-    tauriCommandSurface.includes("generate_handler![doctor,offline_demo,group_templates,create_group,discover_tools]"),
+  tauriCommands.length === 6 &&
+    tauriCommandSurface.includes(
+      "generate_handler![doctor,offline_demo,group_templates,create_group,discover_tools,plan_preview]",
+    ),
   "apps/desktop/src-tauri/src/lib.rs:commands",
-  "M2 exposes only doctor, offline_demo, group_templates, local create_group, and allowlisted discover_tools",
+  "M4 adds only the typed local plan_preview command; no generic process or network command is exposed",
 );
 
 const result = {

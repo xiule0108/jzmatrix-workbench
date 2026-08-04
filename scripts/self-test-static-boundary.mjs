@@ -103,6 +103,12 @@ try {
     checkId: "security.tool_discovery_allowlist",
   });
   assertInjectionBlocks({
+    name: "dry-run-process-command",
+    path: "crates/matrix-core/src/dry_run.rs",
+    injection: '/* std::process::Command::new("sh") */',
+    checkId: "security.dry_run_no_execution",
+  });
+  assertInjectionBlocks({
     name: "runtime-frontend-fetch",
     path: "apps/desktop/src/main.ts",
     injection: 'fetch("https://example.invalid");',
@@ -113,7 +119,7 @@ try {
       contract: "jzmatrix.static-boundary-self-test",
       version: "1.0.0",
       ok: true,
-      cases: 14,
+      cases: 15,
     }),
   );
 } finally {

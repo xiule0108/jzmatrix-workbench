@@ -40,6 +40,11 @@ enum Commands {
         #[command(subcommand)]
         command: ToolCommands,
     },
+    /// Generate a local, reviewable plan without executing any external operation.
+    Plan {
+        #[command(subcommand)]
+        command: PlanCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -99,6 +104,19 @@ enum ToolCommands {
     },
     /// List the static discovery catalog without probing the machine.
     Catalog {
+        /// Emit exactly one versioned JSON response on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PlanCommands {
+    /// Preview create/send/resume/cancel permissions; execution is never authorized here.
+    Preview {
+        /// Local collaboration group id.
+        #[arg(long)]
+        group_id: String,
         /// Emit exactly one versioned JSON response on stdout.
         #[arg(long)]
         json: bool,
@@ -186,6 +204,16 @@ fn main() -> ExitCode {
             ToolCommands::Discover { json: emit_json } => {
                 let response = tool_discovery_response();
                 print_group_response(&response, emit_json, "jzmatrix tools discover: pass");
+                ExitCode::from(response.exit_code() as u8)
+            }
+        },
+        Commands::Plan { command } => match command {
+            PlanCommands::Preview {
+                group_id,
+                json: emit_json,
+            } => {
+                let response = dry_run_preview_response(&group_id);
+                print_group_response(&response, emit_json, "jzmatrix plan preview: pass");
                 ExitCode::from(response.exit_code() as u8)
             }
         },
@@ -434,6 +462,60 @@ fn tool_discovery_response() -> CliResponse {
     }
 }
 
+fn dry_run_preview_response(group_id: &str) -> CliResponse {
+    let Some(app_data_dir) = matrix_core::default_app_data_dir() else {
+        return matrix_core::blocked_command_response(
+            "plan.preview",
+            "app_data_unavailable",
+            "无法解析应用数据目录",
+        );
+    };
+    match matrix_core::create_dry_run_plan(&app_data_dir.join("db/app.sqlite3"), group_id) {
+        Ok(plan) => CliResponse {
+            contract: "jzmatrix.cli-response".to_owned(),
+            version: "1.0.0".to_owned(),
+            command: "plan.preview".to_owned(),
+            request_id: matrix_core::new_request_id(),
+            ok: true,
+            status: ResponseStatus::Pass,
+            outcome: Outcome::Committed,
+            data: matrix_core::dry_run_plan_response_data(&plan),
+            errors: Vec::new(),
+            warnings: vec![matrix_core::WarningItem {
+                code: "execution_not_authorized".to_owned(),
+                message: "计划已保存到本机事实源，但不会启动进程、读取会话、联网或执行外部写入"
+                    .to_owned(),
+            }],
+            evidence: vec![EvidenceRef {
+                kind: "sqlite".to_owned(),
+                reference: "evidence:dry-run-plan".to_owned(),
+            }],
+            next_actions: Vec::new(),
+            redactions: Redactions {
+                profile: "v1".to_owned(),
+                fields: vec![
+                    "secrets".to_owned(),
+                    "absolute_paths".to_owned(),
+                    "session_content".to_owned(),
+                ],
+            },
+            extensions: json!({
+                "execution": "not_authorized",
+                "network": false,
+                "external_processes": false,
+                "external_agent_processes": false,
+                "external_writes": false,
+                "existing_sessions_read": false,
+            }),
+        },
+        Err(error) => matrix_core::blocked_command_response(
+            "plan.preview",
+            error.code(),
+            plan_error_message(error.code()),
+        ),
+    }
+}
+
 fn group_error_message(code: &str) -> &'static str {
     match code {
         "invalid_group_input" => "目标、模板或幂等键不符合本地建组输入约束",
@@ -442,6 +524,15 @@ fn group_error_message(code: &str) -> &'static str {
         "group_not_found" => "本机事实源中没有这个协作组",
         "database_integrity_failed" => "本机事实源完整性检查未通过，未继续写入",
         _ => "本地协作组操作未完成",
+    }
+}
+
+fn plan_error_message(code: &str) -> &'static str {
+    match code {
+        "invalid_group_input" => "协作组编号不符合本地计划输入约束",
+        "group_not_found" => "本机事实源中没有这个协作组，未生成计划",
+        "database_integrity_failed" => "本机事实源完整性检查未通过，未生成计划",
+        _ => "只读执行计划未完成",
     }
 }
 

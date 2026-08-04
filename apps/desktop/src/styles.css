@@ -572,6 +572,67 @@ h1 {
   font-size: 10px;
 }
 
+.plan-preview-card {
+  margin: 2rem 0;
+  padding: 1.35rem;
+  border: 1px solid var(--line, #d7d7d2);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--paper, #fff) 88%, #f0eee7);
+}
+
+.plan-preview-card__heading,
+.plan-preview-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.plan-preview-card h2 {
+  margin: 0.25rem 0 0;
+}
+
+.plan-preview-card > p {
+  max-width: 52rem;
+  color: var(--muted, #656560);
+}
+
+.plan-step-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-step-list li {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.plan-step-list small,
+.plan-preview-meta {
+  color: var(--muted, #656560);
+}
+
+.plan-step-list small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.plan-step-mark {
+  color: var(--muted, #656560);
+  font-size: 1.15rem;
+}
+
+.plan-preview-empty {
+  margin-bottom: 1rem;
+}
+
 .tool-scope span {
   color: var(--ink);
   font-weight: 700;
