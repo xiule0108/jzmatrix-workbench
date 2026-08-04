@@ -27,7 +27,7 @@ The Windows cases require `windows-latest` and an NTFS temporary volume. They re
 - `control.safe_resource` must return a known safe marker with HTTP 200.
 - `control.default_deny` must reject a normal `.env?raw` request and must not return the denied marker.
 - The WebSocket case must complete the real Vite HMR handshake and receive an error response for `fetchModule`.
-- The UNC case points only to `\\127.0.0.1\\jzmatrix-no-share`. It instruments the exact filesystem and child-process APIs used by the bundled launch-editor code and requires zero UNC filesystem probes and zero child-process attempts. It also checks that the installed Vite guard precedes both operations. It never names a public SMB host.
+- The UNC case points only to `\\127.0.0.1\\jzmatrix-no-share`. Before loading Vite, the harness installs filesystem and child-process interceptors. A local-file launch request must exercise both interceptors as a positive control; the following UNC request must exercise neither. The case also checks that the installed Vite guard precedes both operations. It never names a public SMB host.
 - Forward- and backslash-traversal requests use raw loopback TCP so URL normalization in a client cannot erase the advisory input before Vite receives it.
 
 Run the probe with:

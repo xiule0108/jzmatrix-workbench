@@ -12,7 +12,44 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createLogger, createServer } from "vite";
+
+const originalExistsSync = fs.existsSync;
+const originalExec = childProcess.exec;
+const originalSpawn = childProcess.spawn;
+const launchSideEffectProbe = {
+  active: false,
+  filesystemPaths: [],
+  childProcessMethods: [],
+};
+
+fs.existsSync = (candidate) => {
+  if (launchSideEffectProbe.active) {
+    const candidatePath = String(candidate);
+    launchSideEffectProbe.filesystemPaths.push(candidatePath);
+    if (candidatePath.startsWith("\\\\")) {
+      throw new Error("test harness blocked an unexpected UNC filesystem probe");
+    }
+  }
+  return originalExistsSync(candidate);
+};
+childProcess.exec = (...values) => {
+  if (launchSideEffectProbe.active) {
+    launchSideEffectProbe.childProcessMethods.push("exec");
+    throw new Error(`test harness blocked an unexpected exec: ${String(values[0])}`);
+  }
+  return originalExec(...values);
+};
+childProcess.spawn = (...values) => {
+  if (launchSideEffectProbe.active) {
+    launchSideEffectProbe.childProcessMethods.push("spawn");
+    throw new Error(`test harness blocked an unexpected spawn: ${String(values[0])}`);
+  }
+  return originalSpawn(...values);
+};
+
+// Install the side-effect interceptors before Vite loads so its bundled launch-editor
+// observes the same fs and child_process functions even if it captures them at import time.
+const { createLogger, createServer } = await import("vite");
 
 const CONTRACT = "jzmatrix.vite-security-verification";
 const VERSION = "1.0.0";
@@ -25,7 +62,7 @@ const publicRoot = join(projectRoot, "p");
 const outsideTextPath = join(temporaryRoot, "outside-canary.txt");
 const outsideHtmlPath = join(temporaryRoot, "outside-canary.html");
 const outsideMapPath = join(temporaryRoot, "outside-canary.map");
-const privatePath = join(projectRoot, "private.txt");
+const privatePath = join(projectRoot, ".env.security-private.txt");
 const deniedLongPath = join(projectRoot, ".env.security-canary-configuration");
 const safeMarker = "JZMATRIX_SAFE_CONTROL_64C3";
 const secretMarker = "JZMATRIX_DENIED_CANARY_64C3";
@@ -273,10 +310,11 @@ const server = await createServer({
     host: HOST,
     port: 0,
     strictPort: false,
+    allowedHosts: [HOST],
     fs: {
       strict: true,
       allow: [projectRoot],
-      deny: [".env", ".env.*", "*.{crt,pem}", privatePath],
+      deny: [".env", ".env.*", "*.{crt,pem}"],
     },
   },
 });
@@ -456,48 +494,54 @@ try {
     "windows.unc_launch_editor_denied",
     async () => {
       const sourceGuard = inspectInstalledUncGuard();
-      const originalExistsSync = fs.existsSync;
-      const originalExec = childProcess.exec;
-      const originalSpawn = childProcess.spawn;
-      let uncFilesystemProbes = 0;
-      let childProcessAttempts = 0;
-      fs.existsSync = (candidate) => {
-        if (String(candidate).startsWith("\\\\")) {
-          uncFilesystemProbes += 1;
-          throw new Error("test harness blocked an unexpected UNC filesystem probe");
-        }
-        return originalExistsSync(candidate);
-      };
-      childProcess.exec = (...values) => {
-        childProcessAttempts += 1;
-        throw new Error(`test harness blocked an unexpected exec: ${String(values[0])}`);
-      };
-      childProcess.spawn = (...values) => {
-        childProcessAttempts += 1;
-        throw new Error(`test harness blocked an unexpected spawn: ${String(values[0])}`);
-      };
+      const previousLaunchEditor = process.env.LAUNCH_EDITOR;
+      process.env.LAUNCH_EDITOR = "jzmatrix-security-probe-editor";
+      launchSideEffectProbe.active = true;
+      launchSideEffectProbe.filesystemPaths = [];
+      launchSideEffectProbe.childProcessMethods = [];
       let response;
+      let controlFilesystemObserved = false;
+      let controlChildProcessObserved = false;
       try {
+        await rawRequest(
+          port,
+          `/__open-in-editor?file=${encodeURIComponent(join(projectRoot, "safe.txt"))}`,
+        );
+        controlFilesystemObserved = launchSideEffectProbe.filesystemPaths.some(
+          (candidate) => resolve(candidate) === resolve(join(projectRoot, "safe.txt")),
+        );
+        controlChildProcessObserved = launchSideEffectProbe.childProcessMethods.length === 1;
+        launchSideEffectProbe.filesystemPaths = [];
+        launchSideEffectProbe.childProcessMethods = [];
+
         const uncPath = "\\\\127.0.0.1\\jzmatrix-no-share\\canary.txt";
         response = await rawRequest(
           port,
           `/__open-in-editor?file=${encodeURIComponent(uncPath)}`,
         );
       } finally {
-        fs.existsSync = originalExistsSync;
-        childProcess.exec = originalExec;
-        childProcess.spawn = originalSpawn;
+        launchSideEffectProbe.active = false;
+        if (previousLaunchEditor === undefined) delete process.env.LAUNCH_EDITOR;
+        else process.env.LAUNCH_EDITOR = previousLaunchEditor;
       }
       assert(response, "UNC guard did not return an HTTP response");
+      assert(controlFilesystemObserved, "filesystem interceptor control did not observe Vite");
+      assert(controlChildProcessObserved, "child-process interceptor control did not observe Vite");
       assert(
         response.status === 200 || response.status === 500,
         `UNC guard returned unexpected HTTP ${response.status}`,
       );
+      const uncFilesystemProbes = launchSideEffectProbe.filesystemPaths.filter((candidate) =>
+        candidate.startsWith("\\\\"),
+      ).length;
+      const childProcessAttempts = launchSideEffectProbe.childProcessMethods.length;
       assert(uncFilesystemProbes === 0, "launch-editor attempted UNC filesystem access");
       assert(childProcessAttempts === 0, "launch-editor attempted to start a child process");
       return {
         http_status: response.status,
         loopback_unc_only: true,
+        interceptor_control_local_filesystem_observed: controlFilesystemObserved,
+        interceptor_control_child_process_observed: controlChildProcessObserved,
         unc_filesystem_probes: uncFilesystemProbes,
         child_process_attempts: childProcessAttempts,
         ...sourceGuard,
