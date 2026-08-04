@@ -608,16 +608,61 @@ function renderTechnicalDetails(): string {
     </details>`;
 }
 
+function currentEvidenceRecord(id: EvidenceId): EvidenceRecord {
+  if (id === "connect" && state.toolDiscovery) {
+    const available = state.toolDiscovery.tools.filter((tool) => tool.status === "available").length;
+    return {
+      ...evidenceRecords.connect,
+      status: `已检查 ${available}/${state.toolDiscovery.tools.length} 个入口`,
+      source: "real · user_triggered · Mac-M2 固定白名单快照",
+      observed: `本机观察于 ${formatDate(state.toolDiscovery.observed_at)}；仅保存脱敏摘要`,
+      canConfirm: "可以确认具名入口的版本、帮助检查、能力标记和不可用原因",
+      cannotConfirm: "不能确认工具已连接、会话已恢复、消息已送达或任务已完成",
+      next: "等待独立适配器 Gate 和真实平台回执，不把能力快照当成连接",
+    };
+  }
+  if (id === "plan" && state.dryRunPlan) {
+    return {
+      ...evidenceRecords.plan,
+      status: "已保存 · execution=not_authorized",
+      source: `${state.dryRunPlan.data_source} · Mac-M4 本地 SQLite 计划记录`,
+      observed: `计划 ${state.dryRunPlan.id} 生成于 ${formatDate(state.dryRunPlan.observed_at)}`,
+      canConfirm: "可以确认四个未来动作均要求独立授权，且当前权限快照全部关闭",
+      cannotConfirm: "不能确认任何外部动作已经发生；计划本身不是执行回执",
+    };
+  }
+  return evidenceRecords[id];
+}
+
+function renderDiscoveryEvidenceSnapshot(): string {
+  if (!state.toolDiscovery) return "";
+  return `<section class="evidence-snapshot" data-testid="tool-evidence-snapshot"><div class="evidence-snapshot__heading"><strong>脱敏能力快照</strong><code>data_source=real · invocation=user_triggered</code></div><ul>${state.toolDiscovery.tools
+    .map(
+      (tool) =>
+        `<li><span><strong>${escapeHtml(tool.label)}</strong><small>${escapeHtml(tool.id)} · ${escapeHtml(tool.status)} · help=${escapeHtml(tool.help_status)}</small></span><code>${escapeHtml(tool.version ?? tool.reason ?? "—")}${tool.output_sha256 ? ` · sha256:${escapeHtml(tool.output_sha256.slice(0, 12))}…` : ""}</code></li>`,
+    )
+    .join("")}</ul><p>未展示原始 stdout/stderr、可执行文件路径、配置、会话或凭据。</p></section>`;
+}
+
+function renderPlanEvidenceSnapshot(): string {
+  if (!state.dryRunPlan) return "";
+  const permissions = state.dryRunPlan.permissions;
+  return `<section class="evidence-snapshot" data-testid="plan-evidence-snapshot"><div class="evidence-snapshot__heading"><strong>权限快照</strong><code>execution=not_authorized</code></div><ul>${state.dryRunPlan.steps
+    .map((step) => `<li><span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.operation)} · ${escapeHtml(step.status)}</small></span><code>requires_confirmation=true</code></li>`)
+    .join("")}</ul><p>进程=${permissions.external_processes} · 网络=${permissions.network} · 外部写入=${permissions.external_writes} · 会话读取=${permissions.session_reads} · 秘密读取=${permissions.secrets_reads}</p></section>`;
+}
+
 function renderEvidenceDrawer(): string {
   if (!state.evidence) return "";
-  const record = evidenceRecords[state.evidence];
+  const record = currentEvidenceRecord(state.evidence);
+  const snapshot = state.evidence === "connect" ? renderDiscoveryEvidenceSnapshot() : state.evidence === "plan" ? renderPlanEvidenceSnapshot() : "";
   return `
     <div class="drawer-layer" data-testid="evidence-drawer">
       <button class="drawer-backdrop" type="button" aria-label="关闭依据" data-action="close-evidence"></button>
       <section class="evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
         <div class="drawer-header"><div><p class="eyebrow">查看依据</p><h2 id="evidence-title">${escapeHtml(record.title)}</h2></div><button class="drawer-close" type="button" aria-label="关闭依据" data-action="close-evidence">×</button></div>
         <div class="drawer-status">${statusTag(record.status, state.evidence === "demo-boundary" ? "demo" : "unknown", state.evidence === "demo-boundary" ? "示" : "○")}</div>
-        <dl class="evidence-list"><div><dt>依据</dt><dd>${escapeHtml(record.source)}</dd></div><div><dt>观察时间</dt><dd>${escapeHtml(record.observed)}</dd></div><div><dt>目前能确认</dt><dd>${escapeHtml(record.canConfirm)}</dd></div><div><dt>目前不能确认</dt><dd>${escapeHtml(record.cannotConfirm)}</dd></div><div><dt>下一步</dt><dd>${escapeHtml(record.next)}</dd></div></dl>
+        <dl class="evidence-list"><div><dt>依据</dt><dd>${escapeHtml(record.source)}</dd></div><div><dt>观察时间</dt><dd>${escapeHtml(record.observed)}</dd></div><div><dt>目前能确认</dt><dd>${escapeHtml(record.canConfirm)}</dd></div><div><dt>目前不能确认</dt><dd>${escapeHtml(record.cannotConfirm)}</dd></div><div><dt>下一步</dt><dd>${escapeHtml(record.next)}</dd></div></dl>${snapshot}
         <button class="button button--primary button--full" type="button" data-action="close-evidence">回到当前页面</button>
       </section>
     </div>`;

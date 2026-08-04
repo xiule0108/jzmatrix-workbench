@@ -633,6 +633,57 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.evidence-snapshot {
+  margin: 1.2rem 0;
+  padding: 0.9rem;
+  border: 1px solid var(--line, #d7d7d2);
+  border-radius: 0.75rem;
+  background: var(--paper-deep, #f0eee7);
+}
+
+.evidence-snapshot__heading,
+.evidence-snapshot li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.evidence-snapshot__heading code,
+.evidence-snapshot li code {
+  color: var(--ink-faint, #72726b);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.evidence-snapshot ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-snapshot li {
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(110, 105, 94, 0.16);
+}
+
+.evidence-snapshot li small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--ink-faint, #72726b);
+}
+
+.evidence-snapshot > p {
+  margin: 0;
+  color: var(--ink-faint, #72726b);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .tool-scope span {
   color: var(--ink);
   font-weight: 700;
