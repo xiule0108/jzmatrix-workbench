@@ -102,12 +102,30 @@ try {
     injection: 'fetch("https://example.invalid");',
     checkId: "security.no_runtime_network_or_shell",
   });
+  assertInjectionBlocks({
+    name: "ci-unpinned-action",
+    path: ".github/workflows/verify.yml",
+    injection: "uses: actions/cache@main",
+    checkId: "ci.actions_pinned",
+  });
+  assertInjectionBlocks({
+    name: "ci-write-permission",
+    path: ".github/workflows/verify.yml",
+    injection: "permissions: write-all",
+    checkId: "ci.permissions_read_only",
+  });
+  assertInjectionBlocks({
+    name: "ci-artifact-export",
+    path: ".github/workflows/verify.yml",
+    injection: `uses: actions/${["upload", "artifact"].join("-")}@${"a".repeat(40)}`,
+    checkId: "ci.no_artifact_exfiltration_or_callbacks",
+  });
   console.log(
     JSON.stringify({
       contract: "jzmatrix.static-boundary-self-test",
       version: "1.0.0",
       ok: true,
-      cases: 13,
+      cases: 16,
     }),
   );
 } finally {

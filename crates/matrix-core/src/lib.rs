@@ -824,6 +824,52 @@ pub fn ensure_schema(db_path: &Path) -> Result<(), CoreError> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DatabaseInspection {
+    pub contract: String,
+    pub version: String,
+    pub integrity: String,
+    pub foreign_key_violations: usize,
+    pub migration_count: usize,
+    pub tables: Vec<String>,
+}
+
+pub fn inspect_product_database(db_path: &Path) -> Result<DatabaseInspection, CoreError> {
+    let connection = Connection::open(db_path)?;
+    let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+
+    let mut foreign_key_statement = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut foreign_key_rows = foreign_key_statement.query([])?;
+    let mut foreign_key_violations = 0_usize;
+    while foreign_key_rows.next()?.is_some() {
+        foreign_key_violations += 1;
+    }
+    let migration_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE status = 'committed'",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut table_statement = connection.prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )?;
+    let tables = table_statement
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+
+    if integrity != "ok" || foreign_key_violations > 0 || migration_count < 0 {
+        return Err(CoreError::DatabaseIntegrity);
+    }
+
+    Ok(DatabaseInspection {
+        contract: "jzmatrix.sqlite-inspection".to_owned(),
+        version: "1.0.0".to_owned(),
+        integrity,
+        foreign_key_violations,
+        migration_count: migration_count as usize,
+        tables,
+    })
+}
+
 pub fn default_app_data_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("com", "JIEZIJIUWEI", "JZMatrix Workbench")
         .map(|dirs| dirs.data_dir().to_path_buf())
@@ -966,8 +1012,11 @@ pub fn run_doctor(app_data_dir: &Path) -> CliResponse {
         data_dir_reason,
     ));
 
-    let sqlite_status = match ensure_schema(&app_data_dir.join("db/app.sqlite3")) {
-        Ok(()) => CheckStatus::Pass,
+    let database_path = app_data_dir.join("db/app.sqlite3");
+    let database_inspection =
+        ensure_schema(&database_path).and_then(|()| inspect_product_database(&database_path));
+    let sqlite_status = match &database_inspection {
+        Ok(_) => CheckStatus::Pass,
         Err(_) => CheckStatus::Blocked,
     };
     let sqlite_reason = if matches!(&sqlite_status, CheckStatus::Pass) {
@@ -1085,8 +1134,39 @@ pub fn run_doctor(app_data_dir: &Path) -> CliResponse {
             profile: "v1".to_owned(),
             fields: Vec::new(),
         },
-        extensions: json!({"network": "disabled_by_default", "daemon_mode": false}),
+        extensions: json!({
+            "network": "disabled_by_default",
+            "daemon_mode": false,
+            "database": database_inspection.ok(),
+        }),
     }
+}
+
+pub fn run_ephemeral_doctor() -> CliResponse {
+    let app_data_dir = std::env::temp_dir().join(format!("jzmatrix-doctor-{}", new_request_id()));
+    let response = run_doctor(&app_data_dir);
+    let cleanup_succeeded = fs::remove_dir_all(&app_data_dir).is_ok();
+    finish_ephemeral_doctor(response, cleanup_succeeded)
+}
+
+fn finish_ephemeral_doctor(mut response: CliResponse, cleanup_succeeded: bool) -> CliResponse {
+    if !cleanup_succeeded {
+        response = blocked_response(
+            "ephemeral_cleanup_failed",
+            "临时产品数据目录未能清理，检查结果已阻断",
+        );
+    }
+    if let Some(extensions) = response.extensions.as_object_mut() {
+        extensions.insert(
+            "storage".to_owned(),
+            json!({
+                "mode": "ephemeral_product_temp",
+                "path_redacted": true,
+                "cleanup_succeeded": cleanup_succeeded,
+            }),
+        );
+    }
+    response
 }
 
 fn writable_probe(app_data_dir: &Path) -> Result<(), CoreError> {
@@ -1218,6 +1298,39 @@ mod tests {
             })
             .expect("migration count");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn sqlite_inspection_reports_expected_schema_without_exposing_a_path() {
+        let directory = tempfile::tempdir().expect("temporary app data directory");
+        let db = directory.path().join("db/app.sqlite3");
+        ensure_schema(&db).expect("schema application");
+        let inspection = inspect_product_database(&db).expect("database inspection");
+
+        assert_eq!(inspection.integrity, "ok");
+        assert_eq!(inspection.foreign_key_violations, 0);
+        assert_eq!(inspection.migration_count, 1);
+        assert_eq!(
+            inspection.tables,
+            vec![
+                "app_meta".to_owned(),
+                "collaboration_groups".to_owned(),
+                "schema_migrations".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ephemeral_cleanup_failure_is_blocked_without_a_path() {
+        let directory = tempfile::tempdir().expect("temporary app data directory");
+        let response = finish_ephemeral_doctor(run_doctor(directory.path()), false);
+        let serialized = serde_json::to_string(&response).expect("serialize blocked response");
+
+        assert!(!response.ok);
+        assert_eq!(response.exit_code(), 2);
+        assert_eq!(response.errors[0].code, "ephemeral_cleanup_failed");
+        assert_eq!(response.extensions["storage"]["cleanup_succeeded"], false);
+        assert!(!serialized.contains(&directory.path().display().to_string()));
     }
 
     #[test]

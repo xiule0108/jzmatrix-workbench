@@ -23,7 +23,7 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | Offline fixture and doctor | Implemented as a local baseline |
 | Fixed synthetic platform fixture parsing | Implemented for two bundled, manifest-verified fixtures |
 | Offline novice flow | Implemented as a clearly labelled demo; no real tool actions |
-| macOS and Windows packages | Not released; Windows support is not claimed |
+| macOS and Windows packages | Unsigned Windows installer evidence is exercised in CI; Windows support is not claimed |
 | Real adapters and external writes | Not implemented |
 
 See the [roadmap](docs/ROADMAP.md), [governance](GOVERNANCE.md), and [review policy](docs/REVIEW_POLICY.md).
@@ -38,6 +38,7 @@ The macOS bootstrap requires Node.js 24.14.0 and npm 11.9.0. It can install the 
 ./scripts/doctor.sh
 cargo run --offline --locked -p jzmatrix-cli -- --version
 cargo run --offline --locked -p jzmatrix-cli -- doctor --json
+cargo run --offline --locked -p jzmatrix-cli -- offline-demo --json
 npm run tauri:dev
 npm run tauri:build:app
 ```
@@ -61,9 +62,17 @@ The versioned parser returns event sequence evidence and separate `activity`, `l
 
 This is a fixed parser and evidence-view capability only. It does not execute an external process, read arbitrary paths, read existing sessions, persist prompt/tool/response bodies, or claim complete Codex/Claude Code protocol coverage. Real adapters, create/send/resume/cancel, Windows support, and S2 evidence remain outside this branch.
 
+### Constrained Windows installer evidence
+
+The `windows-latest` verification job builds one unsigned NSIS installer and exercises it in a disposable runner environment. It silently installs the desktop app, launches the installed executable, runs the bundled CLI from an empty directory, verifies both fixed platform fixtures and the product-created temporary SQLite database, takes a process-tree network snapshot, uninstalls, and checks exact product paths, processes, and registry entries before cleanup. The packaged runtime is tested with Node.js, npm, Cargo, and rustc removed from `PATH`.
+
+The evidence installer embeds the official WebView2 offline installer so install-time runtime downloads are not required. Its approximate 127 MB size impact and WebView2 redistribution terms remain a P1 release decision; this evidence branch does not settle the public distribution policy. GitHub-hosted Windows does not provide a reliable human-observable WebView assertion, so process launch is recorded while the three-step WebView UI remains unproven. Network evidence is one post-start process-tree connection snapshot, not continuous packet capture.
+
+This remains a read-only evidence slice. It does not scan existing tool sessions or user project directories, connect an Agent, write to an external platform, sign an installer, publish a release, or constitute formal Windows support.
+
 `tauri:build:app` produces an unsigned macOS `.app` baseline. Signing, notarization, release installers, and update/rollback infrastructure are outside P1-A.
 
-P1-A does not implement real adapters, create/send/resume/cancel actions, existing-session reads, external Agent writes, shell access, arbitrary SQL, a daemon, an updater, or remote URLs. Windows has a CI verification entry only; this branch does not claim native Windows support or a Windows package release.
+P1-A/P1-B evidence does not implement real adapters, create/send/resume/cancel actions, existing-session reads, external Agent writes, shell access, arbitrary SQL, a daemon, an updater, or remote URLs. Windows has a constrained installer verification entry only; this branch does not claim native Windows support or a Windows package release.
 
 ## 中文说明
 

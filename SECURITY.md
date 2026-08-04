@@ -20,3 +20,5 @@ Include the affected version or commit, operating system, impact, reproduction s
 - Official packages require signatures, hashes, an SBOM, provenance, and a tested recovery path.
 
 P1-A treats product runtime source and development-only shell scripts as separate static-review sets. Product runtime cannot use network or process-start APIs. Development scripts are checked independently; only the exact rustup bootstrap download and execution in `bootstrap.sh`, and the offline Cargo handoff in `doctor.sh`, are allowlisted. These development commands are not product capabilities.
+
+The constrained P1-B Windows job adds installer evidence without expanding product permissions. It uses only fixed bundled fixtures, an empty working directory, and a product-created temporary SQLite database. The workflow has `contents: read`, pins every Action by full commit SHA, uploads no artifact, and makes no callback. The installed process-tree connection check is a point-in-time observation and must not be represented as continuous network capture or proof of a rendered WebView flow.
