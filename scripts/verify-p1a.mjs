@@ -75,7 +75,28 @@ record(
   "Both dependency lockfiles must be committed",
 );
 if (existsSync(cargoLockPath)) {
-  record("locks.cargo_version", /version = 4/.test(readText("Cargo.lock")), "Cargo.lock:version");
+  const cargoLock = readText("Cargo.lock");
+  record("locks.cargo_version", /version = 4/.test(cargoLock), "Cargo.lock:version");
+  const cargoPackages = cargoLock
+    .split("[[package]]")
+    .slice(1)
+    .map((block) => ({
+      name: /^name = "([^"]+)"$/m.exec(block)?.[1] ?? null,
+      version: /^version = "([^"]+)"$/m.exec(block)?.[1] ?? null,
+    }));
+  const hasCargoPackage = (name, version) =>
+    cargoPackages.some((entry) => entry.name === name && entry.version === version);
+  record(
+    "locks.cargo_security_graph",
+    hasCargoPackage("tauri", "2.11.1") &&
+      hasCargoPackage("tauri-build", "2.6.1") &&
+      hasCargoPackage("serde_with", "3.21.0") &&
+      hasCargoPackage("time", "0.3.47") &&
+      !hasCargoPackage("rand", "0.7.3") &&
+      hasCargoPackage("glib", "0.18.5"),
+    "Cargo.lock:Tauri/serde_with/time/rand/glib",
+    "The reviewed Tauri security graph must remain locked and the Linux/BSD glib blocker must stay visible",
+  );
 }
 if (existsSync(npmLockPath)) {
   const npmLock = readJson("package-lock.json");
@@ -84,6 +105,18 @@ if (existsSync(npmLockPath)) {
     npmLock.lockfileVersion === 3 && npmLock.packages?.[""],
     "package-lock.json:lockfileVersion",
     "npm lockfileVersion 3 is required",
+  );
+  const desktopLock = npmLock.packages?.["apps/desktop"] ?? {};
+  record(
+    "locks.npm_tauri_gate",
+    desktopLock.dependencies?.["@tauri-apps/api"] === "=2.11.1" &&
+      desktopLock.devDependencies?.["@tauri-apps/cli"] === "=2.11.1" &&
+      desktopLock.devDependencies?.vite === "=6.1.0" &&
+      npmLock.packages?.["node_modules/@tauri-apps/api"]?.version === "2.11.1" &&
+      npmLock.packages?.["node_modules/@tauri-apps/cli"]?.version === "2.11.1" &&
+      npmLock.packages?.["node_modules/vite"]?.version === "6.1.0",
+    "package-lock.json:desktop Tauri API/CLI and isolated Vite gate",
+    "Tauri API/CLI must be 2.11.1 while Vite remains exactly 6.1.0 in this gate",
   );
 }
 
@@ -261,6 +294,23 @@ record(
     /generate_handler!\[doctor, offline_demo\]/.test(readText("apps/desktop/src-tauri/src/lib.rs")),
   "apps/desktop/src-tauri/src/lib.rs:commands",
   "P1-A exposes only doctor and offline_demo",
+);
+
+const windowsOriginProbe = readText("scripts/verify-windows-origin-confusion.mjs");
+record(
+  "security.windows_origin_confusion_probe",
+  /tauri\.evil\.test/.test(windowsOriginProbe) &&
+    /__TAURI_INTERNALS__/.test(windowsOriginProbe) &&
+    /"doctor", "offline_demo"/.test(windowsOriginProbe) &&
+    /app_process_alive/.test(windowsOriginProbe) &&
+    /node scripts\/verify-windows-origin-confusion\.mjs/.test(verifyWorkflow) &&
+    /AdditionalBrowserArguments/.test(verifyWorkflow) &&
+    /windows-webview2-diagnostics\.json/.test(verifyWorkflow) &&
+    /browser_args_value_restored/.test(verifyWorkflow) &&
+    /hosts_marker_residual/.test(verifyWorkflow) &&
+    /if: always\(\) && runner\.os == 'Windows'/.test(verifyWorkflow),
+  "Windows WebView2 remote-origin probe+verify workflow",
+  "Windows CI must load a non-local tauri.* origin in WebView2 and prove both typed commands are blocked",
 );
 
 const result = {
