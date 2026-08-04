@@ -1,14 +1,13 @@
 use std::process::Command;
 
 #[test]
-fn doctor_json_is_parseable_and_offline_by_default() {
-    let directory = tempfile::tempdir().expect("temporary app data directory");
+fn ephemeral_doctor_json_is_parseable_and_offline() {
+    let directory = tempfile::tempdir().expect("temporary runtime root");
     let output = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
-        .env("HOME", directory.path())
-        .env("APPDATA", directory.path())
-        .env("LOCALAPPDATA", directory.path())
-        .env("XDG_DATA_HOME", directory.path())
-        .args(["doctor", "--json"])
+        .env("TMPDIR", directory.path())
+        .env("TEMP", directory.path())
+        .env("TMP", directory.path())
+        .args(["doctor", "--ephemeral", "--json"])
         .output()
         .expect("run jzmatrix doctor");
 

@@ -294,6 +294,7 @@ record(
 );
 
 const windowsEvidenceScript = readText("scripts/verify-windows-readonly.ps1");
+const windowsProfileBoundaryScript = readText("scripts/assert-windows-profile-clean.ps1");
 record(
   "windows.runner_boundary",
   /doctor", "--ephemeral", "--json/u.test(windowsEvidenceScript) &&
@@ -302,10 +303,25 @@ record(
     /before_install/u.test(windowsEvidenceScript) &&
     /after_cleanup/u.test(windowsEvidenceScript) &&
     /Remove-SafeTaskPath/u.test(windowsEvidenceScript) &&
+    /taskOwnedProductDataRoots/u.test(windowsEvidenceScript) &&
+    /mutation_performed\s*=\s*\$false/u.test(windowsProfileBoundaryScript) &&
+    /job_start/u.test(workflowText) &&
+    /after_cli_resource_build/u.test(workflowText) &&
+    /after_rust_workspace/u.test(workflowText) &&
+    /after_installer_build/u.test(workflowText) &&
     !/JZMATRIX_EPHEMERAL_RUNTIME/u.test(windowsEvidenceScript) &&
     !productRuntimeText.includes("JZMATRIX_EPHEMERAL_RUNTIME"),
   "scripts/verify-windows-readonly.ps1:read-only/install/network/cleanup evidence",
   "Windows runner evidence must stay temporary, read-only, and free of product test hooks",
+);
+
+const cliJsonTests = readText("crates/jzmatrix-cli/tests/cli_json.rs");
+record(
+  "windows.cli_tests_use_ephemeral_doctor",
+  /args\(\["doctor", "--ephemeral", "--json"\]\)/u.test(cliJsonTests) &&
+    !/args\(\["doctor", "--json"\]\)/u.test(cliJsonTests),
+  "crates/jzmatrix-cli/tests/cli_json.rs:doctor process tests",
+  "CLI process tests must not rely on APPDATA to redirect Windows Known Folders",
 );
 
 const capabilities = readJson("apps/desktop/src-tauri/capabilities/main.json");

@@ -273,6 +273,7 @@ $originalEnvironment = [ordered]@{
 $desktopProcessIds = @()
 $uninstallerPath = $null
 $failureMessage = $null
+$taskOwnedProductDataRoots = @()
 
 New-Item -ItemType Directory -Path $evidenceRoot, $emptyProjectRoot, $isolatedRoamingRoot, $isolatedLocalRoot, $isolatedTempRoot -Force | Out-Null
 $env:APPDATA = $isolatedRoamingRoot
@@ -291,6 +292,9 @@ try {
         sandbox_root = $sandboxRoot
         installer_sha256 = (Get-FileHash -LiteralPath $resolvedInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
     })
+    $taskOwnedProductDataRoots = @($beforeSnapshot.product_data |
+        Where-Object { -not $_.exists } |
+        ForEach-Object { $_.path })
     Assert-Condition (-not $beforeSnapshot.install_root_exists) "Install root must be absent before installation."
     Assert-Condition ($beforeSnapshot.registry_entries.Count -eq 0) "A pre-existing JZMatrix installation would make this evidence ambiguous."
     Assert-Condition (@($beforeSnapshot.product_data | Where-Object exists).Count -eq 0) "Pre-existing product data would make this evidence ambiguous."
@@ -495,7 +499,7 @@ try {
     Assert-Condition ($rawAfterUninstall.registry_entries.Count -eq 0) "Product uninstall registry entries remained."
     Assert-Condition ($rawAfterUninstall.product_processes.Count -eq 0) "Product processes remained after uninstall."
 
-    foreach ($productDataRoot in $productDataRoots) {
+    foreach ($productDataRoot in $taskOwnedProductDataRoots) {
         if (Test-Path -LiteralPath $productDataRoot) {
             Remove-SafeTaskPath -Path $productDataRoot -AllowedParent $actualRoamingRoot
         }
@@ -520,7 +524,7 @@ try {
         Start-Process -FilePath $uninstallerPath -ArgumentList @("/S") -Wait -ErrorAction SilentlyContinue | Out-Null
     }
     Remove-TaskRegistryEntries -SandboxRoot $sandboxRoot
-    foreach ($productDataRoot in $productDataRoots) {
+    foreach ($productDataRoot in $taskOwnedProductDataRoots) {
         if (Test-Path -LiteralPath $productDataRoot) {
             Remove-SafeTaskPath -Path $productDataRoot -AllowedParent $actualRoamingRoot
         }
@@ -538,12 +542,16 @@ try {
         sandbox_root_exists = Test-Path -LiteralPath $sandboxRoot
         registry_entries = @(Get-ProductRegistryEntries)
         product_data = @($productDataRoots | ForEach-Object {
-            [pscustomobject]@{ path = $_; exists = Test-Path -LiteralPath $_ }
+            [pscustomobject]@{
+                path = $_
+                exists = Test-Path -LiteralPath $_
+                task_owned = $taskOwnedProductDataRoots -contains $_
+            }
         })
     }
     $cleanupOk = (-not $cleanupSnapshot.sandbox_root_exists) -and
         $cleanupSnapshot.registry_entries.Count -eq 0 -and
-        @($cleanupSnapshot.product_data | Where-Object exists).Count -eq 0
+        @($cleanupSnapshot.product_data | Where-Object { $_.task_owned -and $_.exists }).Count -eq 0
     Write-Evidence -Stage "after_cleanup" -Status $(if ($cleanupOk) { "pass" } else { "blocked" }) -Data $cleanupSnapshot
     if (-not $cleanupOk -and $null -eq $failureMessage) {
         $failureMessage = "Final task cleanup left product residuals."
