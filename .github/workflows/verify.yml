@@ -1,4 +1,4 @@
-name: P1-A verify
+name: P1-A and constrained P1-B verify
 
 on:
   push:
@@ -20,6 +20,11 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Assert clean Windows product state at job start
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/assert-windows-profile-clean.ps1 -Stage job_start
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -48,6 +53,15 @@ jobs:
           npm run typecheck
           npm run build
 
+      - name: Prepare bundled Windows CLI resource
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked -p jzmatrix-cli
+
+      - name: Assert CLI build left no Windows profile state
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/assert-windows-profile-clean.ps1 -Stage after_cli_resource_build
+
       - name: Verify Rust workspace
         run: |
           cargo fmt --check
@@ -55,10 +69,33 @@ jobs:
           cargo check --workspace --locked
           cargo build --locked -p jzmatrix-cli
 
+      - name: Assert Rust tests left no Windows profile state
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/assert-windows-profile-clean.ps1 -Stage after_rust_workspace
+
       - name: Build unsigned macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build:app
 
       - name: Build unsigned Windows installer
         if: runner.os == 'Windows'
+        shell: pwsh
         run: npm run tauri:build
+
+      - name: Assert Windows build left no profile state
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/assert-windows-profile-clean.ps1 -Stage after_installer_build
+
+      - name: Verify installed Windows read-only slice
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath target\release\bundle\nsis -File -Filter *.exe)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one unsigned NSIS installer, found $($installers.Count)."
+          }
+          ./scripts/verify-windows-readonly.ps1 `
+            -InstallerPath $installers[0].FullName `
+            -RepositoryRoot $PWD.Path

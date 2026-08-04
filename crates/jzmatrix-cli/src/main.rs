@@ -22,6 +22,15 @@ enum Commands {
         /// Emit exactly one versioned JSON response on stdout.
         #[arg(long)]
         json: bool,
+        /// Create and remove an isolated product database under the operating-system temp root.
+        #[arg(long)]
+        ephemeral: bool,
+    },
+    /// Read the bundled offline demonstration without contacting tools or a network.
+    OfflineDemo {
+        /// Emit exactly one versioned JSON response on stdout.
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect one of the bundled synthetic platform fixtures without filesystem or process access.
     Fixture {
@@ -53,13 +62,8 @@ fn main() -> ExitCode {
     };
 
     match command {
-        Commands::Doctor { json } => {
-            let response = match matrix_core::default_app_data_dir() {
-                Some(path) => matrix_core::run_doctor(&path),
-                None => {
-                    matrix_core::blocked_response("app_data_unavailable", "无法解析应用数据目录")
-                }
-            };
+        Commands::Doctor { json, ephemeral } => {
+            let response = doctor_response(ephemeral);
             if json {
                 match serde_json::to_string(&response) {
                     Ok(serialized) => println!("{serialized}"),
@@ -67,6 +71,20 @@ fn main() -> ExitCode {
                 }
             } else {
                 println!("jzmatrix doctor: {:?}", &response.status);
+            }
+            ExitCode::from(response.exit_code() as u8)
+        }
+        Commands::OfflineDemo { json } => {
+            let response = offline_demo_response();
+            if json {
+                match serde_json::to_string(&response) {
+                    Ok(serialized) => println!("{serialized}"),
+                    Err(_) => return ExitCode::from(4),
+                }
+            } else if response.ok {
+                println!("jzmatrix offline-demo: pass");
+            } else {
+                println!("jzmatrix offline-demo: blocked");
             }
             ExitCode::from(response.exit_code() as u8)
         }
@@ -90,6 +108,56 @@ fn main() -> ExitCode {
             }
             ExitCode::from(response.exit_code() as u8)
         }
+    }
+}
+
+fn doctor_response(ephemeral: bool) -> CliResponse {
+    if !ephemeral {
+        return match matrix_core::default_app_data_dir() {
+            Some(path) => matrix_core::run_doctor(&path),
+            None => matrix_core::blocked_response("app_data_unavailable", "无法解析应用数据目录"),
+        };
+    }
+
+    matrix_core::run_ephemeral_doctor()
+}
+
+fn offline_demo_response() -> CliResponse {
+    match matrix_core::offline_demo() {
+        Ok(data) => CliResponse {
+            contract: "jzmatrix.cli-response".to_owned(),
+            version: "1.0.0".to_owned(),
+            command: "offline-demo".to_owned(),
+            request_id: matrix_core::new_request_id(),
+            ok: true,
+            status: ResponseStatus::Pass,
+            outcome: Outcome::NotCommitted,
+            data,
+            errors: Vec::new(),
+            warnings: vec![matrix_core::WarningItem {
+                code: "demo_data_only".to_owned(),
+                message: "只返回随包演示数据，不代表真实平台状态".to_owned(),
+            }],
+            evidence: vec![EvidenceRef {
+                kind: "fixture".to_owned(),
+                reference: "fixture:offline-demo".to_owned(),
+            }],
+            next_actions: Vec::new(),
+            redactions: Redactions {
+                profile: "v1".to_owned(),
+                fields: Vec::new(),
+            },
+            extensions: json!({
+                "offline": true,
+                "external_processes": false,
+                "real_sessions": false,
+            }),
+        },
+        Err(error) => matrix_core::blocked_command_response(
+            "offline-demo",
+            error.code(),
+            "随包离线 fixture 摘要校验未通过",
+        ),
     }
 }
 

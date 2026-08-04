@@ -154,7 +154,9 @@ const productRuntimeFiles = [
 ];
 const developmentShellScriptFiles = walk("scripts").filter((path) => path.endsWith(".sh"));
 const maintenanceScriptFiles = walk("scripts").filter(
-  (path) => path.endsWith(".mjs") && normalizedPath(path) !== "scripts/verify-p1a.mjs",
+  (path) =>
+    (path.endsWith(".mjs") || path.endsWith(".ps1")) &&
+    normalizedPath(path) !== "scripts/verify-p1a.mjs",
 );
 const reviewedSourceFiles = [
   ...productRuntimeFiles,
@@ -221,6 +223,41 @@ record(
     : `unapproved network or command startup: ${shellRiskHits.join(", ")}`,
 );
 
+const workflowText = readText(".github/workflows/verify.yml");
+const actionReferences = [...workflowText.matchAll(/^\s*uses:\s*([^\s#]+)/gmu)].map(
+  (match) => match[1],
+);
+record(
+  "ci.actions_pinned",
+  actionReferences.length >= 2 &&
+    actionReferences.every((reference) => /@[0-9a-f]{40}$/u.test(reference)),
+  ".github/workflows/verify.yml:uses",
+  "Every GitHub Action must use a full commit SHA",
+);
+const permissionsBlock = workflowText.match(/^permissions:\s*\r?\n((?: {2}.+\r?\n)+)/mu)?.[1] ?? "";
+const declaredPermissions = permissionsBlock
+  .trim()
+  .split(/\r?\n/u)
+  .map((line) => line.trim())
+  .filter(Boolean);
+record(
+  "ci.permissions_read_only",
+  declaredPermissions.length === 1 &&
+    declaredPermissions[0] === "contents: read" &&
+    (workflowText.match(/^permissions:/gmu) ?? []).length === 1 &&
+    !/(?:write-all|id-token:\s*write|contents:\s*write|security-events:\s*write)/iu.test(workflowText),
+  ".github/workflows/verify.yml:permissions",
+  "The verification workflow must declare only contents: read",
+);
+record(
+  "ci.no_artifact_exfiltration_or_callbacks",
+  !/(?:secrets\.|upload-artifact|repository_dispatch|workflow_run|Invoke-WebRequest|Invoke-RestMethod|curl\s|wget\s)/iu.test(
+    workflowText,
+  ),
+  ".github/workflows/verify.yml:triggers+steps",
+  "The verification workflow must not export artifacts, use secrets, or call remote endpoints",
+);
+
 const tauriConfig = readJson("apps/desktop/src-tauri/tauri.conf.json");
 const csp = tauriConfig.app?.security?.csp ?? "";
 record(
@@ -232,6 +269,59 @@ record(
     csp.includes("connect-src 'self' ipc: http://ipc.localhost"),
   "apps/desktop/src-tauri/tauri.conf.json:security/bundle/build",
   "Tauri must load local resources and keep updater artifacts disabled",
+);
+
+const windowsTauriConfig = readJson("apps/desktop/src-tauri/tauri.windows.conf.json");
+const windowsResources = windowsTauriConfig.bundle?.resources ?? {};
+const expectedWindowsResourceTargets = [
+  "bin/jzmatrix.exe",
+  "fixtures/offline-demo/manifest.json",
+  "fixtures/offline-demo/offline-demo.json",
+  "fixtures/platform-events/manifest.json",
+  "fixtures/platform-events/codex-cli-v1.json",
+  "fixtures/platform-events/claude-code-v1.json",
+].sort();
+record(
+  "windows.bundle_read_only_evidence",
+  windowsTauriConfig.bundle?.targets?.length === 1 &&
+    windowsTauriConfig.bundle.targets[0] === "nsis" &&
+    windowsTauriConfig.bundle?.windows?.webviewInstallMode?.type === "offlineInstaller" &&
+    windowsTauriConfig.bundle?.windows?.webviewInstallMode?.silent === true &&
+    windowsTauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" &&
+    Object.values(windowsResources).sort().join(",") === expectedWindowsResourceTargets.join(","),
+  "apps/desktop/src-tauri/tauri.windows.conf.json:bundle",
+  "Windows evidence builds must embed the CLI, fixed fixtures, and the offline WebView2 installer",
+);
+
+const windowsEvidenceScript = readText("scripts/verify-windows-readonly.ps1");
+const windowsProfileBoundaryScript = readText("scripts/assert-windows-profile-clean.ps1");
+record(
+  "windows.runner_boundary",
+  /doctor", "--ephemeral", "--json/u.test(windowsEvidenceScript) &&
+    /offline-demo", "--json/u.test(windowsEvidenceScript) &&
+    /Get-NetTCPConnection/u.test(windowsEvidenceScript) &&
+    /before_install/u.test(windowsEvidenceScript) &&
+    /after_cleanup/u.test(windowsEvidenceScript) &&
+    /Remove-SafeTaskPath/u.test(windowsEvidenceScript) &&
+    /taskOwnedProductDataRoots/u.test(windowsEvidenceScript) &&
+    /mutation_performed\s*=\s*\$false/u.test(windowsProfileBoundaryScript) &&
+    /job_start/u.test(workflowText) &&
+    /after_cli_resource_build/u.test(workflowText) &&
+    /after_rust_workspace/u.test(workflowText) &&
+    /after_installer_build/u.test(workflowText) &&
+    !/JZMATRIX_EPHEMERAL_RUNTIME/u.test(windowsEvidenceScript) &&
+    !productRuntimeText.includes("JZMATRIX_EPHEMERAL_RUNTIME"),
+  "scripts/verify-windows-readonly.ps1:read-only/install/network/cleanup evidence",
+  "Windows runner evidence must stay temporary, read-only, and free of product test hooks",
+);
+
+const cliJsonTests = readText("crates/jzmatrix-cli/tests/cli_json.rs");
+record(
+  "windows.cli_tests_use_ephemeral_doctor",
+  /args\(\["doctor", "--ephemeral", "--json"\]\)/u.test(cliJsonTests) &&
+    !/args\(\["doctor", "--json"\]\)/u.test(cliJsonTests),
+  "crates/jzmatrix-cli/tests/cli_json.rs:doctor process tests",
+  "CLI process tests must not rely on APPDATA to redirect Windows Known Folders",
 );
 
 const capabilities = readJson("apps/desktop/src-tauri/capabilities/main.json");
@@ -265,6 +355,7 @@ const result = {
     real_adapters: false,
     external_agent_writes: false,
     windows_support_claim: false,
+    windows_read_only_installer_evidence: true,
   },
 };
 console.log(JSON.stringify(result, null, 2));
