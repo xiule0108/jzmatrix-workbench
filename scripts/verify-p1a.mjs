@@ -174,7 +174,11 @@ record(
 );
 
 const productRuntimeText = productRuntimeFiles
-  .filter((path) => !path.endsWith("tauri.conf.json") && path !== "crates/matrix-core/src/tool_discovery.rs")
+  .filter(
+    (path) =>
+      !path.endsWith("tauri.conf.json") &&
+      normalizedPath(path) !== "crates/matrix-core/src/tool_discovery.rs",
+  )
   .map((path) => readText(path))
   .join("\n");
 const runtimeNetworkOrProcessPattern =
