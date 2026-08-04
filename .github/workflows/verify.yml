@@ -35,6 +35,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Verify Vite security regressions
+        run: npm run test:security:vite
+
       - name: Verify static P1-A security boundary
         run: |
           npm run self-test:static-boundary
