@@ -83,3 +83,88 @@ fn fixture_inspect_rejects_unknown_or_path_like_ids_without_echoing_them() {
     let output_text = String::from_utf8_lossy(&output.stdout);
     assert!(!output_text.contains(requested_id));
 }
+
+#[test]
+fn local_group_create_is_idempotent_and_does_not_start_tools() {
+    let directory = tempfile::tempdir().expect("temporary app data directory");
+    let args = [
+        "group",
+        "create",
+        "--goal",
+        "整理一份可复核的本地工作包",
+        "--template",
+        "research",
+        "--idempotency-key",
+        "test-group-create-001",
+        "--json",
+    ];
+    let first = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .env("HOME", directory.path())
+        .env("APPDATA", directory.path())
+        .env("LOCALAPPDATA", directory.path())
+        .env("XDG_DATA_HOME", directory.path())
+        .args(args)
+        .output()
+        .expect("create local group");
+    assert!(
+        first.status.success(),
+        "first create failed: {:?}",
+        first.status
+    );
+    let first_json: serde_json::Value =
+        serde_json::from_slice(&first.stdout).expect("first create output must be JSON");
+    assert_eq!(first_json["command"], "group.create");
+    assert_eq!(first_json["data"]["data_source"], "demo");
+    assert_eq!(first_json["data"]["template_id"], "research");
+    let local_fact = first_json["data"]["facts"]
+        .as_array()
+        .expect("group facts array")
+        .iter()
+        .find(|fact| fact["kind"] == "local_written")
+        .expect("local_written fact");
+    assert_eq!(local_fact["state"], "observed");
+    assert_eq!(first_json["extensions"]["external_processes"], false);
+    assert_eq!(first_json["extensions"]["replayed"], false);
+
+    let second = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .env("HOME", directory.path())
+        .env("APPDATA", directory.path())
+        .env("LOCALAPPDATA", directory.path())
+        .env("XDG_DATA_HOME", directory.path())
+        .args(args)
+        .output()
+        .expect("replay local group");
+    assert!(
+        second.status.success(),
+        "replay failed: {:?}",
+        second.status
+    );
+    let second_json: serde_json::Value =
+        serde_json::from_slice(&second.stdout).expect("replay output must be JSON");
+    assert_eq!(second_json["extensions"]["replayed"], true);
+    assert_eq!(second_json["data"]["id"], first_json["data"]["id"]);
+
+    let conflict = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .env("HOME", directory.path())
+        .env("APPDATA", directory.path())
+        .env("LOCALAPPDATA", directory.path())
+        .env("XDG_DATA_HOME", directory.path())
+        .args([
+            "group",
+            "create",
+            "--goal",
+            "另一件事",
+            "--template",
+            "research",
+            "--idempotency-key",
+            "test-group-create-001",
+            "--json",
+        ])
+        .output()
+        .expect("run conflicting local group");
+    assert_eq!(conflict.status.code(), Some(2));
+    let conflict_json: serde_json::Value =
+        serde_json::from_slice(&conflict.stdout).expect("conflict output must be JSON");
+    assert_eq!(conflict_json["errors"][0]["code"], "idempotency_conflict");
+    assert!(!String::from_utf8_lossy(&conflict.stdout).contains("另一件事"));
+}

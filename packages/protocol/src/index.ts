@@ -68,3 +68,38 @@ export interface OfflineDemo {
   groups: OfflineDemoGroup[];
   optional_agent: { status: "not_run"; reason: string };
 }
+
+export interface GroupTemplate {
+  id: string;
+  version: string;
+  label: string;
+  description: string;
+  roles: string[];
+  data_source: "fixture";
+}
+
+export interface GroupRole {
+  id: string;
+  label: string;
+  ordinal: number;
+}
+
+export interface GroupFact {
+  kind: string;
+  state: "unknown" | "observed" | "not_confirmed" | "not_run";
+  evidence_ref?: string | null;
+  observed_at: string;
+}
+
+export interface CollaborationGroup {
+  id: string;
+  data_source: "demo" | "fixture";
+  goal: string;
+  template_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  roles: GroupRole[];
+  facts: GroupFact[];
+  replayed: boolean;
+}

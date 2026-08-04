@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -15,6 +15,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const INITIAL_MIGRATION_SQL: &str = include_str!("../migrations/0001_initial.sql");
+const LOCAL_GROUPS_MIGRATION_SQL: &str = include_str!("../migrations/0002_local_groups.sql");
 const OFFLINE_DEMO_MANIFEST: &str = include_str!("../../../fixtures/offline-demo/manifest.json");
 const OFFLINE_DEMO_JSON: &str = include_str!("../../../fixtures/offline-demo/offline-demo.json");
 const PLATFORM_FIXTURE_MANIFEST: &str =
@@ -44,6 +45,14 @@ pub enum CoreError {
     FixtureEventConflict,
     #[error("database integrity check failed")]
     DatabaseIntegrity,
+    #[error("group input is invalid")]
+    InvalidGroupInput,
+    #[error("group template was not found")]
+    GroupTemplateNotFound,
+    #[error("idempotency key was reused with different input")]
+    IdempotencyConflict,
+    #[error("group was not found")]
+    GroupNotFound,
 }
 
 impl CoreError {
@@ -58,6 +67,10 @@ impl CoreError {
             Self::FixtureSchemaUnsupported => "fixture_schema_unsupported",
             Self::FixtureEventConflict => "fixture_event_conflict",
             Self::DatabaseIntegrity => "database_integrity_failed",
+            Self::InvalidGroupInput => "invalid_group_input",
+            Self::GroupTemplateNotFound => "group_template_not_found",
+            Self::IdempotencyConflict => "idempotency_conflict",
+            Self::GroupNotFound => "group_not_found",
         }
     }
 }
@@ -198,6 +211,52 @@ impl CliResponse {
             ResponseStatus::Blocked | ResponseStatus::Unknown => 2,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupTemplate {
+    pub id: String,
+    pub version: String,
+    pub label: String,
+    pub description: String,
+    pub roles: Vec<String>,
+    pub data_source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupRole {
+    pub id: String,
+    pub label: String,
+    pub ordinal: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupFact {
+    pub kind: String,
+    pub state: String,
+    pub evidence_ref: Option<String>,
+    pub observed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollaborationGroup {
+    pub id: String,
+    pub data_source: String,
+    pub goal: String,
+    pub template_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub roles: Vec<GroupRole>,
+    pub facts: Vec<GroupFact>,
+    pub replayed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateGroupInput<'a> {
+    pub goal: &'a str,
+    pub template_id: &'a str,
+    pub idempotency_key: &'a str,
 }
 
 pub fn now_utc() -> String {
@@ -799,6 +858,7 @@ fn looks_like_private_value(value: &str) -> bool {
 }
 
 pub fn ensure_schema(db_path: &Path) -> Result<(), CoreError> {
+    let database_existed = db_path.exists();
     if let Some(parent) = db_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -815,6 +875,36 @@ pub fn ensure_schema(db_path: &Path) -> Result<(), CoreError> {
     )?;
     transaction.commit()?;
 
+    for (version, name, migration_sql) in [(2_i64, "0002_local_groups", LOCAL_GROUPS_MIGRATION_SQL)]
+    {
+        let expected_checksum = sha256_hex(migration_sql.as_bytes());
+        let applied: Option<(String, String)> = connection
+            .query_row(
+                "SELECT checksum_sha256, status FROM schema_migrations WHERE version = ?1",
+                params![version],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((checksum, status)) = applied {
+            if checksum != expected_checksum || status != "committed" {
+                return Err(CoreError::DatabaseIntegrity);
+            }
+            continue;
+        }
+
+        if database_existed {
+            backup_before_migration(&mut connection, db_path, version)?;
+        }
+        let migration = connection.transaction()?;
+        migration.execute_batch(migration_sql)?;
+        migration.execute(
+            "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at, status) VALUES (?1, ?2, ?3, ?4, 'committed')",
+            params![version, name, expected_checksum, now_utc()],
+        )?;
+        migration.commit()?;
+        write_last_known_good(&mut connection, db_path)?;
+    }
+
     let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
     let mut foreign_key_statement = connection.prepare("PRAGMA foreign_key_check")?;
     let mut foreign_key_rows = foreign_key_statement.query([])?;
@@ -824,9 +914,333 @@ pub fn ensure_schema(db_path: &Path) -> Result<(), CoreError> {
     Ok(())
 }
 
+fn backup_before_migration(
+    connection: &mut Connection,
+    db_path: &Path,
+    version: i64,
+) -> Result<(), CoreError> {
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    let backup_dir = db_path
+        .parent()
+        .map(|parent| parent.join("backups"))
+        .ok_or_else(|| std::io::Error::other("database has no parent"))?;
+    fs::create_dir_all(&backup_dir)?;
+    let stamp = now_utc()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let backup_path = backup_dir.join(format!(
+        "app.sqlite3.before-migration-v{version:04}-{stamp}.sqlite3"
+    ));
+    fs::copy(db_path, &backup_path)?;
+
+    let mut backups = fs::read_dir(&backup_dir)?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("app.sqlite3.before-migration-")
+        })
+        .collect::<Vec<_>>();
+    backups.sort_by_key(|entry| entry.file_name());
+    while backups.len() > 3 {
+        if let Some(entry) = backups.first() {
+            fs::remove_file(entry.path())?;
+        }
+        backups.remove(0);
+    }
+    Ok(())
+}
+
+fn write_last_known_good(connection: &mut Connection, db_path: &Path) -> Result<(), CoreError> {
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    let backup_dir = db_path
+        .parent()
+        .map(|parent| parent.join("backups"))
+        .ok_or_else(|| std::io::Error::other("database has no parent"))?;
+    fs::create_dir_all(&backup_dir)?;
+    fs::copy(
+        db_path,
+        backup_dir.join("app.sqlite3.last-known-good.sqlite3"),
+    )?;
+    Ok(())
+}
+
 pub fn default_app_data_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("com", "JIEZIJIUWEI", "JZMatrix Workbench")
         .map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+pub fn builtin_group_templates() -> Vec<GroupTemplate> {
+    vec![
+        GroupTemplate {
+            id: "compact".to_owned(),
+            version: "1.0.0".to_owned(),
+            label: "简单完成".to_owned(),
+            description: "适合先把一件事讲清楚并得到检查".to_owned(),
+            roles: vec!["统筹".to_owned(), "执行".to_owned(), "独立检查".to_owned()],
+            data_source: "fixture".to_owned(),
+        },
+        GroupTemplate {
+            id: "research".to_owned(),
+            version: "1.0.0".to_owned(),
+            label: "查资料并核对".to_owned(),
+            description: "增加资料与复核分工，适合事实核验".to_owned(),
+            roles: vec!["统筹".to_owned(), "资料".to_owned(), "独立检查".to_owned()],
+            data_source: "fixture".to_owned(),
+        },
+        GroupTemplate {
+            id: "product".to_owned(),
+            version: "1.0.0".to_owned(),
+            label: "从需求做到成品".to_owned(),
+            description: "覆盖需求、实现和发布前检查".to_owned(),
+            roles: vec![
+                "统筹".to_owned(),
+                "执行".to_owned(),
+                "验证".to_owned(),
+                "发布前检查".to_owned(),
+            ],
+            data_source: "fixture".to_owned(),
+        },
+        GroupTemplate {
+            id: "content".to_owned(),
+            version: "1.0.0".to_owned(),
+            label: "写作与成品".to_owned(),
+            description: "适合资料、写作、视觉和发布前检查".to_owned(),
+            roles: vec![
+                "资料".to_owned(),
+                "写作".to_owned(),
+                "成品整理".to_owned(),
+                "检查".to_owned(),
+            ],
+            data_source: "fixture".to_owned(),
+        },
+    ]
+}
+
+fn template_roles(template_id: &str) -> Option<Vec<(&'static str, &'static str)>> {
+    match template_id {
+        "compact" => Some(vec![
+            ("coordination", "统筹"),
+            ("execution", "执行"),
+            ("independent_review", "独立检查"),
+        ]),
+        "research" => Some(vec![
+            ("coordination", "统筹"),
+            ("research", "资料"),
+            ("independent_review", "独立检查"),
+        ]),
+        "product" => Some(vec![
+            ("coordination", "统筹"),
+            ("execution", "执行"),
+            ("verification", "验证"),
+            ("release_review", "发布前检查"),
+        ]),
+        "content" => Some(vec![
+            ("research", "资料"),
+            ("writing", "写作"),
+            ("production", "成品整理"),
+            ("review", "检查"),
+        ]),
+        _ => None,
+    }
+}
+
+fn open_app_database(db_path: &Path) -> Result<Connection, CoreError> {
+    let connection = Connection::open(db_path)?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.pragma_update(None, "busy_timeout", 3_000_i64)?;
+    connection.execute_batch("PRAGMA journal_mode=WAL;")?;
+    Ok(connection)
+}
+
+fn valid_group_component(value: &str, max_chars: usize) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= max_chars
+        && !value.chars().any(|character| character.is_control())
+        && !value.contains('/')
+        && !value.contains('\\')
+}
+
+fn load_group_tx(
+    transaction: &Transaction<'_>,
+    group_id: &str,
+) -> Result<CollaborationGroup, CoreError> {
+    let group = transaction
+        .query_row(
+            "SELECT id, data_source, goal, template_id, status, created_at, updated_at
+             FROM collaboration_groups WHERE id = ?1",
+            params![group_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(CoreError::GroupNotFound)?;
+
+    let mut role_statement = transaction.prepare(
+        "SELECT role_id, role_label, ordinal
+         FROM collaboration_group_roles WHERE group_id = ?1 ORDER BY ordinal ASC",
+    )?;
+    let roles = role_statement
+        .query_map(params![group_id], |row| {
+            Ok(GroupRole {
+                id: row.get(0)?,
+                label: row.get(1)?,
+                ordinal: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut fact_statement = transaction.prepare(
+        "SELECT fact_kind, state, evidence_ref, observed_at
+         FROM collaboration_group_facts WHERE group_id = ?1 ORDER BY fact_kind ASC",
+    )?;
+    let facts = fact_statement
+        .query_map(params![group_id], |row| {
+            Ok(GroupFact {
+                kind: row.get(0)?,
+                state: row.get(1)?,
+                evidence_ref: row.get(2)?,
+                observed_at: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(CollaborationGroup {
+        id: group.0,
+        data_source: group.1,
+        goal: group.2,
+        template_id: group.3,
+        status: group.4,
+        created_at: group.5,
+        updated_at: group.6,
+        roles,
+        facts,
+        replayed: false,
+    })
+}
+
+pub fn load_collaboration_group(
+    db_path: &Path,
+    group_id: &str,
+) -> Result<CollaborationGroup, CoreError> {
+    if !valid_group_component(group_id, 128) {
+        return Err(CoreError::InvalidGroupInput);
+    }
+    ensure_schema(db_path)?;
+    let mut connection = open_app_database(db_path)?;
+    let transaction = connection.transaction()?;
+    let group = load_group_tx(&transaction, group_id)?;
+    transaction.commit()?;
+    Ok(group)
+}
+
+pub fn create_collaboration_group(
+    db_path: &Path,
+    input: CreateGroupInput<'_>,
+) -> Result<CollaborationGroup, CoreError> {
+    let goal = input.goal.trim();
+    if !valid_group_component(input.template_id, 64)
+        || !valid_group_component(input.idempotency_key, 128)
+        || goal.is_empty()
+        || goal.chars().count() > 120
+    {
+        return Err(CoreError::InvalidGroupInput);
+    }
+    if template_roles(input.template_id).is_none() {
+        return Err(CoreError::GroupTemplateNotFound);
+    }
+
+    ensure_schema(db_path)?;
+    let mut connection = open_app_database(db_path)?;
+    let transaction = connection.transaction()?;
+    let request_hash =
+        sha256_hex(format!("jzmatrix.group.create.v1\n{}\n{}", input.template_id, goal).as_bytes());
+
+    let existing: Option<(String, String)> = transaction
+        .query_row(
+            "SELECT request_hash, group_id FROM group_idempotency_keys
+             WHERE operation_key = ?1 AND operation_kind = 'group.create'",
+            params![input.idempotency_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((existing_hash, group_id)) = existing {
+        if existing_hash != request_hash {
+            return Err(CoreError::IdempotencyConflict);
+        }
+        let mut group = load_group_tx(&transaction, &group_id)?;
+        group.replayed = true;
+        transaction.commit()?;
+        return Ok(group);
+    }
+
+    let group_id = Uuid::now_v7().to_string();
+    let observed_at = now_utc();
+    transaction.execute(
+        "INSERT INTO collaboration_groups
+            (id, data_source, goal, status, created_at, updated_at, template_id)
+         VALUES (?1, 'demo', ?2, 'draft_local', ?3, ?3, ?4)",
+        params![group_id, goal, observed_at, input.template_id],
+    )?;
+
+    for (ordinal, (role_id, role_label)) in template_roles(input.template_id)
+        .expect("template validated above")
+        .into_iter()
+        .enumerate()
+    {
+        transaction.execute(
+            "INSERT INTO collaboration_group_roles
+                (group_id, role_id, role_label, ordinal, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![group_id, role_id, role_label, ordinal as i64, observed_at],
+        )?;
+    }
+
+    let initial_facts = [
+        ("activity", "observed", Some("group_created")),
+        ("progress", "unknown", None),
+        ("local_written", "observed", Some("group_created")),
+        ("sent_not_confirmed", "not_run", None),
+        ("delivered", "unknown", None),
+        ("accepted", "unknown", None),
+        ("completed", "unknown", None),
+    ];
+    for (fact_kind, state, evidence) in initial_facts {
+        transaction.execute(
+            "INSERT INTO collaboration_group_facts
+                (group_id, fact_kind, state, evidence_ref, observed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![group_id, fact_kind, state, evidence, observed_at],
+        )?;
+    }
+
+    transaction.execute(
+        "INSERT INTO group_idempotency_keys
+            (operation_key, operation_kind, request_hash, group_id, created_at)
+         VALUES (?1, 'group.create', ?2, ?3, ?4)",
+        params![input.idempotency_key, request_hash, group_id, observed_at],
+    )?;
+
+    let group = load_group_tx(&transaction, &group_id)?;
+    transaction.commit()?;
+    Ok(group)
 }
 
 pub fn blocked_response(code: &str, message: &str) -> CliResponse {
@@ -1211,13 +1625,52 @@ mod tests {
         let db = directory.path().join("db/app.sqlite3");
         ensure_schema(&db).expect("first schema application");
         ensure_schema(&db).expect("second schema application");
-        let connection = Connection::open(db).expect("open database");
+        let connection = Connection::open(&db).expect("open database");
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .expect("migration count");
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
+        assert!(db
+            .parent()
+            .expect("database parent")
+            .join("backups/app.sqlite3.last-known-good.sqlite3")
+            .is_file());
+
+        let pre_migration_db = directory.path().join("pre-migration/app.sqlite3");
+        if let Some(parent) = pre_migration_db.parent() {
+            fs::create_dir_all(parent).expect("create pre-migration parent");
+        }
+        let connection = Connection::open(&pre_migration_db).expect("open v1 database");
+        connection
+            .execute_batch(INITIAL_MIGRATION_SQL)
+            .expect("create v1 schema");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at, status)
+                 VALUES (?1, ?2, ?3, ?4, 'committed')",
+                params![
+                    1_i64,
+                    "0001_initial",
+                    sha256_hex(INITIAL_MIGRATION_SQL.as_bytes()),
+                    now_utc()
+                ],
+            )
+            .expect("record v1 migration");
+        drop(connection);
+        ensure_schema(&pre_migration_db).expect("forward migration with backup");
+        let backup_dir = pre_migration_db
+            .parent()
+            .expect("pre-migration parent")
+            .join("backups");
+        assert!(fs::read_dir(backup_dir)
+            .expect("read migration backups")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("app.sqlite3.before-migration-v0002-")));
     }
 
     #[test]
