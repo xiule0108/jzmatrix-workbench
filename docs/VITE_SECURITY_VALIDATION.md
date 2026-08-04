@@ -22,6 +22,8 @@ This document records the official advisory branches exercised by `scripts/test-
 
 The Windows cases require `windows-latest` and an NTFS temporary volume. They report `skipped` on other operating systems instead of claiming a pass. The 8.3 case obtains the real NTFS short path; if automatic short-name generation is unavailable, it attempts to assign a short alias to the temporary canary only. Failure to obtain an actual alias blocks the test.
 
+On GitHub Windows runners, `%TEMP%` itself can resolve through an 8.3 parent such as `RUNNER~1`. The harness therefore creates its random disposable Windows fixture under the checked-out workspace, asserts that the normal project root has no `~`, and removes it in `finally`. This keeps the positive control canonical while the dedicated 8.3 case still exercises and requires rejection of a real short name.
+
 ## Instrument controls
 
 - `control.safe_resource` must return a known safe marker with HTTP 200.

@@ -56,7 +56,11 @@ const VERSION = "1.0.0";
 const HOST = "127.0.0.1";
 const isWindows = process.platform === "win32";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const temporaryRoot = mkdtempSync(join(tmpdir(), "jzmatrix-vite-security-"));
+// GitHub Windows runners expose %TEMP% through an 8.3 parent (`RUNNER~1`). Vite
+// correctly rejects that alternate path, so use the checked-out workspace as
+// the parent for the random, disposable Windows fixture.
+const temporaryParent = isWindows ? repoRoot : tmpdir();
+const temporaryRoot = mkdtempSync(join(temporaryParent, ".jzmatrix-vite-security-"));
 const projectRoot = join(temporaryRoot, "project-with-long-security-name");
 const publicRoot = join(projectRoot, "p");
 const outsideTextPath = join(temporaryRoot, "outside-canary.txt");
@@ -276,6 +280,13 @@ function websocketInvoke(url, token, data) {
       rejectInvoke(new Error("Vite WebSocket connection failed"));
     });
   });
+}
+
+if (isWindows) {
+  assert(
+    !normalizedFsPath(projectRoot).includes("~"),
+    "Windows probe root must not inherit an NTFS 8.3 path; use the dedicated short-name case",
+  );
 }
 
 mkdirSync(projectRoot, { recursive: true });
