@@ -45,6 +45,10 @@ jobs:
           npm run typecheck
           npm run build
 
+      - name: Prepare bundled Windows CLI resource
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked -p jzmatrix-cli
+
       - name: Verify Rust workspace
         run: |
           cargo fmt --check
@@ -59,9 +63,7 @@ jobs:
       - name: Build unsigned Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          cargo build --release --locked -p jzmatrix-cli
-          npm run tauri:build
+        run: npm run tauri:build
 
       - name: Verify installed Windows read-only slice
         if: runner.os == 'Windows'

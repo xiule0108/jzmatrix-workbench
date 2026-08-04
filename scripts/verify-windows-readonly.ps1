@@ -155,7 +155,9 @@ function Get-WebView2State {
     $versions = @()
     foreach ($root in $roots) {
         if (Test-Path -LiteralPath $root) {
-            $versions += @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | ForEach-Object Name)
+            $versions += @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+                Where-Object Name -Match "^\d+\." |
+                ForEach-Object Name)
         }
     }
     return [ordered]@{
@@ -302,8 +304,14 @@ try {
     Assert-Condition ($installProcess.ExitCode -eq 0) "NSIS installation failed."
     Assert-Condition (Test-Path -LiteralPath $installRoot) "NSIS did not create the requested install root."
 
-    $desktopCandidates = @(Get-ChildItem -LiteralPath $installRoot -File -Recurse | Where-Object Name -eq "JZMatrix Workbench.exe")
-    $cliCandidates = @(Get-ChildItem -LiteralPath $installRoot -File -Recurse | Where-Object Name -eq "jzmatrix.exe")
+    $installedExecutables = @(Get-ChildItem -LiteralPath $installRoot -File -Recurse -Filter *.exe)
+    Write-Evidence -Stage "installed_executable_inventory" -Status "pass" -Data ([ordered]@{
+        executables = @($installedExecutables | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($installRoot, $_.FullName)
+        })
+    })
+    $desktopCandidates = @($installedExecutables | Where-Object Name -eq "jzmatrix-desktop.exe")
+    $cliCandidates = @($installedExecutables | Where-Object Name -eq "jzmatrix.exe")
     Assert-Condition ($desktopCandidates.Count -eq 1) "Expected exactly one installed desktop executable."
     Assert-Condition ($cliCandidates.Count -eq 1) "Expected exactly one bundled jzmatrix CLI."
     $desktopPath = $desktopCandidates[0].FullName
