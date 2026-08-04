@@ -1,5 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import childProcess, { spawnSync } from "node:child_process";
+import fs, {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -174,6 +182,28 @@ function getWindowsShortBasename(path) {
   }
   if (!shortName.includes("~")) throw new Error("NTFS did not expose the 8.3 probe alias");
   return { shortName, assignedForProbe };
+}
+
+function inspectInstalledUncGuard() {
+  const viteEntry = fileURLToPath(import.meta.resolve("vite"));
+  const chunksDirectory = join(dirname(viteEntry), "chunks");
+  const guardText = "UNC paths are not supported on Windows to avoid security issues.";
+  for (const fileName of readdirSync(chunksDirectory)) {
+    if (!fileName.endsWith(".js")) continue;
+    const source = readFileSync(join(chunksDirectory, fileName), "utf8");
+    const guardIndex = source.indexOf(guardText);
+    if (guardIndex === -1) continue;
+    const existsIndex = source.indexOf("existsSync(fileName)", guardIndex);
+    const execIndex = source.indexOf("childProcess.exec", guardIndex);
+    assert(existsIndex > guardIndex, "UNC guard does not precede the filesystem probe");
+    assert(execIndex > existsIndex, "UNC guard does not precede the editor child process");
+    return {
+      guard_text_present: true,
+      guard_precedes_filesystem_probe: true,
+      guard_precedes_child_process: true,
+    };
+  }
+  throw new Error("installed Vite bundle does not contain the Windows UNC guard");
 }
 
 function websocketInvoke(url, token, data) {
@@ -425,27 +455,53 @@ try {
   await runCase(
     "windows.unc_launch_editor_denied",
     async () => {
-      const captured = [];
-      const originalLog = console.log;
-      console.log = (...values) => captured.push(values.map(String).join(" "));
+      const sourceGuard = inspectInstalledUncGuard();
+      const originalExistsSync = fs.existsSync;
+      const originalExec = childProcess.exec;
+      const originalSpawn = childProcess.spawn;
+      let uncFilesystemProbes = 0;
+      let childProcessAttempts = 0;
+      fs.existsSync = (candidate) => {
+        if (String(candidate).startsWith("\\\\")) {
+          uncFilesystemProbes += 1;
+          throw new Error("test harness blocked an unexpected UNC filesystem probe");
+        }
+        return originalExistsSync(candidate);
+      };
+      childProcess.exec = (...values) => {
+        childProcessAttempts += 1;
+        throw new Error(`test harness blocked an unexpected exec: ${String(values[0])}`);
+      };
+      childProcess.spawn = (...values) => {
+        childProcessAttempts += 1;
+        throw new Error(`test harness blocked an unexpected spawn: ${String(values[0])}`);
+      };
+      let response;
       try {
         const uncPath = "\\\\127.0.0.1\\jzmatrix-no-share\\canary.txt";
-        const response = await rawRequest(
+        response = await rawRequest(
           port,
           `/__open-in-editor?file=${encodeURIComponent(uncPath)}`,
         );
-        assert(
-          response.status === 200 || response.status === 500,
-          `UNC guard returned unexpected HTTP ${response.status}`,
-        );
       } finally {
-        console.log = originalLog;
+        fs.existsSync = originalExistsSync;
+        childProcess.exec = originalExec;
+        childProcess.spawn = originalSpawn;
       }
+      assert(response, "UNC guard did not return an HTTP response");
       assert(
-        captured.some((line) => line.includes("UNC paths are not supported on Windows")),
-        "launch-editor did not emit the Windows UNC security rejection",
+        response.status === 200 || response.status === 500,
+        `UNC guard returned unexpected HTTP ${response.status}`,
       );
-      return { loopback_unc_only: true, security_guard_observed: true };
+      assert(uncFilesystemProbes === 0, "launch-editor attempted UNC filesystem access");
+      assert(childProcessAttempts === 0, "launch-editor attempted to start a child process");
+      return {
+        http_status: response.status,
+        loopback_unc_only: true,
+        unc_filesystem_probes: uncFilesystemProbes,
+        child_process_attempts: childProcessAttempts,
+        ...sourceGuard,
+      };
     },
     { windowsOnly: true, advisories: ["GHSA-v6wh-96g9-6wx3"] },
   );
