@@ -1,6 +1,6 @@
 # JZMatrix Workbench
 
-JZMatrix Workbench is a local-first desktop application and CLI for creating and observing collaboration groups across AI coding tools.
+JZMatrix Workbench is a local-first macOS desktop application and CLI under construction for creating and observing collaboration groups across AI coding tools. Windows remains a deferred terminal target and is not a current support claim.
 
 The project has a constrained P1-A engineering baseline for macOS development. It is not a supported product release and does not include real adapter integrations.
 
@@ -9,7 +9,7 @@ The project has a constrained P1-A engineering baseline for macOS development. I
 - Connect supported AI tools without hiding their capability differences.
 - Create a collaboration group from a clear goal and a small set of templates.
 - Distinguish message delivery, task acceptance, artifact submission, and human acceptance.
-- Provide a simple desktop experience for macOS and Windows plus a stable `jzmatrix` CLI.
+- Provide a simple macOS desktop experience plus a stable `jzmatrix` CLI first; Windows is retained as a later terminal target.
 - Keep user data local by default and avoid private, undocumented vendor storage interfaces.
 
 The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/Copilot, and Zed. Inclusion in a release requires official-interface verification and a real round-trip probe; a candidate name is not a support promise.
@@ -23,7 +23,8 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | Offline fixture and doctor | Implemented as a local baseline |
 | Fixed synthetic platform fixture parsing | Implemented for two bundled, manifest-verified fixtures |
 | Offline novice flow | Implemented as a clearly labelled demo; no real tool actions |
-| macOS and Windows packages | Not released; Windows support is not claimed |
+| macOS package | Not released; the current line is macOS-only |
+| Windows package | Deferred; no current Windows support or release claim |
 | Real adapters and external writes | Not implemented |
 
 See the [roadmap](docs/ROADMAP.md), [governance](GOVERNANCE.md), and [review policy](docs/REVIEW_POLICY.md).
@@ -69,7 +70,7 @@ P1-A does not implement real adapters, create/send/resume/cancel actions, existi
 
 JZMatrix Workbench 是一个本地优先的桌面工具和 CLI，用于连接不同 AI 编码工具、建立分工明确的协作组，并准确呈现接单、执行、提交和验收状态。
 
-核心规划已经通过独立对抗审查，当前仅进入受限 P1-A 工程验证。仓库中的界面只使用明确标注的离线演示数据，CLI 只做本地环境检查和随包合成夹具解析；尚未接入真实工具，也未发布可用安装包。首发目标仍是 macOS 与 Windows，正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
+核心规划已经通过前序独立审查，当前施工范围根据用户裁定切换为 macOS-only。仓库中的界面只使用明确标注的离线演示数据，CLI 只做本地环境检查和随包合成夹具解析；尚未接入真实工具，也未发布可用安装包。Windows 仍是终局目标，但在 Mac 版本达到公开 Beta 前冻结，不构成当前支持声明。正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
 
 ## License
 
