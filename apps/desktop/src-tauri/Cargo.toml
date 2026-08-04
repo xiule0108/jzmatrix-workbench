@@ -2,7 +2,7 @@
 name = "jzmatrix-desktop"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85.1"
+rust-version = "1.88.0"
 license = "Apache-2.0"
 
 [lib]
@@ -10,9 +10,9 @@ name = "jzmatrix_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "=2.0.0", features = [] }
+tauri-build = { version = "=2.6.1", features = [] }
 
 [dependencies]
 matrix-core = { path = "../../../crates/matrix-core" }
-serde_json = "=1.0.135"
-tauri = { version = "=2.0.0", features = [] }
+serde_json = "=1.0.145"
+tauri = { version = "=2.11.1", features = [] }

@@ -6,7 +6,7 @@ cd "$repo_root"
 
 node_version="24.14.0"
 npm_version="11.9.0"
-rust_version="1.85.1"
+rust_version="1.88.0"
 rustup_url="https://sh.rustup.rs"
 
 cargo_bin_dir="${CARGO_HOME:-${HOME}/.cargo}/bin"

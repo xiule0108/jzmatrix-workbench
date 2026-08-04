@@ -30,7 +30,7 @@ jobs:
       - name: Install Rust toolchain
         shell: bash
         run: |
-          rustup toolchain install 1.85.1 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt --component clippy
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -62,3 +62,141 @@ jobs:
       - name: Build unsigned Windows installer
         if: runner.os == 'Windows'
         run: npm run tauri:build
+
+      - name: Verify Windows remote-origin isolation in WebView2
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $marker = '# jzmatrix-origin-probe'
+          $hostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+          $browserArgsPath = 'HKCU:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          $hostsMarkerAdded = $false
+          $browserArgsKeyExisted = $false
+          $browserArgsValueExisted = $false
+          $browserArgsOriginalValue = $null
+          $browserArgsWritten = $false
+          $process = $null
+          $probeExit = 1
+          try {
+            Add-Content -Path $hostsPath -Value "`n127.0.0.1 tauri.evil.test $marker"
+            $hostsMarkerAdded = $true
+            $browserArgsKeyExisted = Test-Path $browserArgsPath
+            if ($browserArgsKeyExisted) {
+              try {
+                $browserArgsOriginalValue = Get-ItemPropertyValue -Path $browserArgsPath -Name 'jzmatrix-desktop.exe' -ErrorAction Stop
+                $browserArgsValueExisted = $true
+              }
+              catch {
+                $browserArgsValueExisted = $false
+              }
+            }
+            New-Item -Path $browserArgsPath -Force | Out-Null
+            New-ItemProperty -Path $browserArgsPath -Name 'jzmatrix-desktop.exe' -Value '--remote-debugging-port=9222' -PropertyType String -Force | Out-Null
+            $browserArgsWritten = $true
+            $app = Resolve-Path 'target\release\jzmatrix-desktop.exe'
+            $process = Start-Process -FilePath $app -PassThru
+            node scripts/verify-windows-origin-confusion.mjs --output windows-origin-confusion.json --process-id $process.Id
+            $probeExit = $LASTEXITCODE
+          }
+          finally {
+            $appAlive = $null -ne $process -and -not $process.HasExited
+            $listeners = @(Get-NetTCPConnection -LocalPort 9222 -State Listen -ErrorAction SilentlyContinue)
+            $webviewProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue |
+              Select-Object ProcessId, ParentProcessId, SessionId, ExecutablePath)
+            if ($null -ne $process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+            if ($browserArgsWritten) {
+              if ($browserArgsValueExisted) {
+                Set-ItemProperty -Path $browserArgsPath -Name 'jzmatrix-desktop.exe' -Value $browserArgsOriginalValue
+              }
+              else {
+                Remove-ItemProperty -Path $browserArgsPath -Name 'jzmatrix-desktop.exe' -ErrorAction SilentlyContinue
+              }
+            }
+            $browserArgsValueRestored = if (-not $browserArgsWritten) {
+              $true
+            }
+            elseif ($browserArgsValueExisted) {
+              (Get-ItemPropertyValue -Path $browserArgsPath -Name 'jzmatrix-desktop.exe') -eq $browserArgsOriginalValue
+            }
+            else {
+              -not ((Get-Item -Path $browserArgsPath).GetValueNames() -contains 'jzmatrix-desktop.exe')
+            }
+            $browserArgsEmptyKeyRemoved = $false
+            if (-not $browserArgsKeyExisted -and (Test-Path $browserArgsPath)) {
+              $remainingValueNames = @((Get-Item -Path $browserArgsPath).GetValueNames())
+              if ($remainingValueNames.Count -eq 0) {
+                Remove-Item -Path $browserArgsPath -Force
+                $browserArgsEmptyKeyRemoved = -not (Test-Path $browserArgsPath)
+              }
+            }
+            $browserArgsKeyExistsAfterCleanup = Test-Path $browserArgsPath
+            if ($hostsMarkerAdded) {
+              $cleanHosts = Get-Content -Path $hostsPath | Where-Object { $_ -notmatch [regex]::Escape($marker) }
+              Set-Content -Path $hostsPath -Value $cleanHosts
+            }
+            $hostsMarkerResidual = @(Get-Content -Path $hostsPath | Where-Object { $_ -match [regex]::Escape($marker) }).Count
+            $appProcessId = if ($null -ne $process) { $process.Id } else { $null }
+            [ordered]@{
+              contract = 'jzmatrix.windows-webview2-runner-diagnostics'
+              version = '1.0.0'
+              app_process_id = $appProcessId
+              app_process_alive_before_cleanup = $appAlive
+              port_9222_listeners = $listeners.Count
+              webview2_process_count = $webviewProcesses.Count
+              webview2_processes = $webviewProcesses
+              runner_user_interactive = [Environment]::UserInteractive
+              runner_session_id = (Get-Process -Id $PID).SessionId
+              browser_args_key_preexisting = $browserArgsKeyExisted
+              browser_args_value_preexisting = $browserArgsValueExisted
+              browser_args_value_restored = $browserArgsValueRestored
+              browser_args_empty_key_removed = $browserArgsEmptyKeyRemoved
+              browser_args_key_exists_after_cleanup = $browserArgsKeyExistsAfterCleanup
+              hosts_marker_residual = $hostsMarkerResidual
+            } | ConvertTo-Json -Depth 4 | Set-Content windows-webview2-diagnostics.json
+          }
+          if (Test-Path windows-origin-confusion.json) { Get-Content windows-origin-confusion.json }
+          Get-Content windows-webview2-diagnostics.json
+          if (-not $browserArgsValueRestored) { throw 'WebView2 browser argument policy was not restored' }
+          if ($hostsMarkerResidual -ne 0) { throw 'origin probe hosts marker was not removed' }
+          if ($probeExit -ne 0) { exit $probeExit }
+
+      - name: Verify NSIS install launch and uninstall
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem 'target\release\bundle\nsis\*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer was not produced' }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'jzmatrix-nsis-probe'
+          if (Test-Path $installRoot) { Remove-Item -Recurse -Force $installRoot }
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "NSIS install failed with $($install.ExitCode)" }
+          $app = Get-ChildItem $installRoot -Filter '*.exe' -Recurse |
+            Where-Object { $_.Name -ne 'uninstall.exe' } |
+            Select-Object -First 1
+          if (-not $app) { throw 'installed application executable was not found' }
+          $process = Start-Process -FilePath $app.FullName -PassThru
+          Start-Sleep -Seconds 5
+          if ($process.HasExited) { throw "installed application exited with $($process.ExitCode)" }
+          Stop-Process -Id $process.Id -Force
+          $uninstaller = Join-Path $installRoot 'uninstall.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'NSIS uninstaller was not found' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
+          for ($attempt = 0; $attempt -lt 30 -and (Test-Path $installRoot); $attempt++) {
+            Start-Sleep -Milliseconds 500
+          }
+          if (Test-Path $installRoot) { throw 'NSIS uninstall left the installation root behind' }
+          [ordered]@{
+            contract = 'jzmatrix.windows-nsis-probe'
+            version = '1.0.0'
+            status = 'pass'
+            installer = $installer.Name
+            installed_executable = $app.Name
+            launched = $true
+            uninstalled = $true
+            version_rollback = 'not_tested_no_prior_signed_installer'
+          } | ConvertTo-Json
