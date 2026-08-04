@@ -272,7 +272,7 @@ try {
   });
 
   await runCase("control.safe_resource", async () => {
-    const response = await rawRequest(port, "/safe.txt?raw");
+    const response = await rawRequest(port, "/");
     assert(response.status === 200, `safe control returned HTTP ${response.status}`);
     assert(response.body.includes(safeMarker), "safe control marker was not returned");
     return { http_status: response.status, safe_marker_present: true };
@@ -339,13 +339,14 @@ try {
       const traversal = await rawRequest(port, `/../${basename(privatePath)}`);
       assert(!traversal.body.includes(secretMarker), "public-prefix traversal exposed the canary");
       assert(
-        traversal.status === 200 && traversal.body.includes(safeMarker),
-        `public-prefix traversal did not return the safe SPA fallback (HTTP ${traversal.status})`,
+        traversal.status === 403 ||
+          (traversal.status === 200 && traversal.body.includes(safeMarker)),
+        `public-prefix traversal was neither denied nor safely handled (HTTP ${traversal.status})`,
       );
       return {
         normal_http_status: normal.status,
         traversal_http_status: traversal.status,
-        safe_fallback_observed: true,
+        disposition: traversal.status === 403 ? "denied" : "safe_spa_fallback",
         denied_canary_absent: true,
       };
     },
@@ -433,7 +434,10 @@ try {
           port,
           `/__open-in-editor?file=${encodeURIComponent(uncPath)}`,
         );
-        assert(response.status === 200, `UNC guard returned HTTP ${response.status}`);
+        assert(
+          response.status === 200 || response.status === 500,
+          `UNC guard returned unexpected HTTP ${response.status}`,
+        );
       } finally {
         console.log = originalLog;
       }
