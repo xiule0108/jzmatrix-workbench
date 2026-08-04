@@ -25,6 +25,7 @@ The first integration candidates are Codex, Claude Code, ZCode, Cursor, VS Code/
 | Offline novice flow | Implemented as a clearly labelled demo; no real tool actions |
 | Mac-M1 local facts and one-click groups | Implemented on `main`; local-only and not an external tool action |
 | Mac-M2 allowlisted tool discovery | Implemented as a user-triggered version/help snapshot; no sessions or tasks are opened |
+| Mac-M4 dry-run permissions | Implemented as a persisted `execution=not_authorized` plan; no external action is available |
 | macOS package | Not released; the current line is macOS-only |
 | Windows package | Deferred; no current Windows support or release claim |
 | Real adapters and external writes | Not implemented |
@@ -61,6 +62,14 @@ cargo run --offline --locked -p jzmatrix-cli -- tools discover --json
 
 The discovery result does not read `~/.codex`, `~/.claude`, session bodies, credentials, or arbitrary paths. An available binary is not a connected Agent and does not grant create, send, resume, cancel, delivery, acceptance, or completion evidence.
 
+After creating a local group, generate a reviewable plan without authorizing any external action:
+
+```sh
+cargo run --offline --locked -p jzmatrix-cli -- plan preview --group-id <local-group-id> --json
+```
+
+The plan records `create`, `send`, `resume`, and `cancel` as `not_authorized`, persists only a redacted local object, and has no process, network, session, or external-write path. A plan is not an adapter and is not evidence that an external tool accepted or executed anything.
+
 ### Fixed synthetic platform fixture parsing
 
 P1-A includes two fully synthetic, transcript-free, secret-free fixtures observed from the 10A probe categories:
@@ -80,13 +89,13 @@ This is a fixed parser and evidence-view capability only. It does not execute an
 
 `tauri:build:app` produces an unsigned macOS `.app` baseline. Signing, notarization, release installers, and update/rollback infrastructure are outside P1-A.
 
-P1-A does not implement real adapters, create/send/resume/cancel actions, existing-session reads, external Agent writes, shell access, arbitrary SQL, a daemon, an updater, or remote URLs. Windows has a CI verification entry only; this branch does not claim native Windows support or a Windows package release.
+P1-A does not implement real adapters or execute create/send/resume/cancel actions, existing-session reads, external Agent writes, shell access, arbitrary SQL, a daemon, an updater, or remote URLs. M4 only persists a `not_authorized` dry-run plan. Windows has a CI verification entry only; this branch does not claim native Windows support or a Windows package release.
 
 ## 中文说明
 
 JZMatrix Workbench 是一个本地优先的桌面工具和 CLI，用于连接不同 AI 编码工具、建立分工明确的协作组，并准确呈现接单、执行、提交和验收状态。
 
-核心规划已经通过前序独立审查，当前施工范围根据用户裁定切换为 macOS-only。仓库中的界面在显式保存本地协作组之前只使用明确标注的离线演示数据；Mac-M1 增加本地 SQLite 事实源和一键建组，Mac-M2 增加用户显式触发的白名单版本与帮助快照，但两个切片都不会启动 Agent 任务或发送消息。尚未接入真实工具，也未发布可用安装包。Windows 仍是终局目标，但在 Mac 版本达到公开 Beta 前冻结，不构成当前支持声明。正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
+核心规划已经通过前序独立审查，当前施工范围根据用户裁定切换为 macOS-only。仓库中的界面在显式保存本地协作组之前只使用明确标注的离线演示数据；Mac-M1 增加本地 SQLite 事实源和一键建组，Mac-M2 增加用户显式触发的白名单版本与帮助快照，Mac-M4 增加可审阅的只读执行计划，但所有外部动作均保持未授权。尚未接入真实工具，也未发布可用安装包。Windows 仍是终局目标，但在 Mac 版本达到公开 Beta 前冻结，不构成当前支持声明。正式发行版不会要求普通用户预装 Node.js、Rust 或数据库。
 
 ## License
 

@@ -140,3 +140,35 @@ export interface ToolDiscoverySnapshot {
   tools: ToolDiscoveryResult[];
   persisted: boolean;
 }
+
+export interface DryRunPermissionSnapshot {
+  external_processes: false;
+  network: false;
+  external_writes: false;
+  configuration_reads: false;
+  session_reads: false;
+  secrets_reads: false;
+}
+
+export interface DryRunStep {
+  id: string;
+  operation: "create" | "send" | "resume" | "cancel";
+  label: string;
+  status: "not_authorized";
+  requires_confirmation: true;
+}
+
+export interface DryRunPlan {
+  contract: "jzmatrix.dry-run-plan";
+  version: string;
+  id: string;
+  group_id: string;
+  observed_at: string;
+  data_source: "demo" | "fixture" | "real";
+  execution: "not_authorized";
+  adapter_status: "not_implemented";
+  target_tools: string[];
+  permissions: DryRunPermissionSnapshot;
+  steps: DryRunStep[];
+  persisted: boolean;
+}

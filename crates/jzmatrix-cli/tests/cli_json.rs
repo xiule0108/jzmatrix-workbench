@@ -188,3 +188,54 @@ fn tool_catalog_is_fixed_and_does_not_probe_the_machine() {
     assert!(catalog.iter().any(|entry| entry["id"] == "claude_code_cli"));
     assert_eq!(response["extensions"]["external_processes"], false);
 }
+
+#[test]
+fn plan_preview_is_persisted_but_never_authorized() {
+    let directory = tempfile::tempdir().expect("temporary app data directory");
+    let envs = [
+        ("HOME", directory.path()),
+        ("APPDATA", directory.path()),
+        ("LOCALAPPDATA", directory.path()),
+        ("XDG_DATA_HOME", directory.path()),
+    ];
+    let create = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .envs(envs.iter().copied())
+        .args([
+            "group",
+            "create",
+            "--goal",
+            "生成只读执行计划",
+            "--template",
+            "compact",
+            "--idempotency-key",
+            "plan-preview-test-001",
+            "--json",
+        ])
+        .output()
+        .expect("create local group");
+    assert!(
+        create.status.success(),
+        "create failed: {:?}",
+        create.status
+    );
+    let group: serde_json::Value = serde_json::from_slice(&create.stdout).expect("group JSON");
+    let group_id = group["data"]["id"].as_str().expect("group id");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jzmatrix"))
+        .envs(envs.iter().copied())
+        .args(["plan", "preview", "--group-id", group_id, "--json"])
+        .output()
+        .expect("preview dry-run plan");
+    assert!(
+        output.status.success(),
+        "preview failed: {:?}",
+        output.status
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).expect("plan JSON");
+    assert_eq!(response["command"], "plan.preview");
+    assert_eq!(response["data"]["execution"], "not_authorized");
+    assert_eq!(response["data"]["adapter_status"], "not_implemented");
+    assert_eq!(response["data"]["steps"].as_array().unwrap().len(), 4);
+    assert_eq!(response["extensions"]["external_processes"], false);
+    assert_eq!(response["extensions"]["external_writes"], false);
+}

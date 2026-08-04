@@ -17,6 +17,7 @@ No implementation construction is authorized until P0 is closed.
 - Three primary paths: connect tools, create a collaboration group, view progress.
 - Mac-M1 local fact source and one-click group creation are implemented first; the group remains local-only and records `local_written` without claiming delivery, acceptance, or completion.
 - Mac-M2 allowlisted discovery is implemented as a user-triggered `--version`/`--help` snapshot; it records only redacted metadata and never reads sessions or starts Agent tasks.
+- Mac-M4 dry-run permissions are implemented as a local persisted plan. `create`, `send`, `resume`, and `cancel` remain `not_authorized`; no external process, network, session read, or write is exposed.
 - macOS arm64 first, then macOS x86_64 clean-install smoke tests.
 - Windows CI artifacts remain historical evidence only; Windows construction and release are deferred until the Mac public-beta Gate closes.
 

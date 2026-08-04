@@ -5,6 +5,7 @@ import type {
   DoctorData,
   OfflineDemo,
   OfflineDemoGroup,
+  DryRunPlan,
   ToolDiscoveryResult,
   ToolDiscoverySnapshot,
 } from "@jzmatrix/protocol";
@@ -21,6 +22,7 @@ type EvidenceId =
   | "progress"
   | "local-written"
   | "delivery"
+  | "plan"
   | "demo-boundary";
 
 interface RuntimeInfo {
@@ -44,6 +46,9 @@ interface PageState {
   discovering: boolean;
   toolDiscovery: ToolDiscoverySnapshot | null;
   discoveryError: string | null;
+  dryRunPlan: DryRunPlan | null;
+  planning: boolean;
+  dryRunError: string | null;
   formError: string | null;
   evidence: EvidenceId | null;
   runtime: RuntimeInfo;
@@ -99,6 +104,9 @@ const state: PageState = {
   discovering: false,
   toolDiscovery: null,
   discoveryError: null,
+  dryRunPlan: null,
+  planning: false,
+  dryRunError: null,
   formError: null,
   evidence: null,
   runtime: {
@@ -179,6 +187,15 @@ const evidenceRecords: Record<EvidenceId, EvidenceRecord> = {
     canConfirm: "发送动作没有在真实工具中执行",
     cannotConfirm: "不能确认对方是否收到消息",
     next: "不要把本机写入当成送达；后续在工具中手动核对",
+  },
+  plan: {
+    title: "只读执行计划",
+    status: "未授权执行",
+    source: "Mac-M4 本地 SQLite 计划记录",
+    observed: "点击生成后保存计划摘要；不会调用外部工具",
+    canConfirm: "可以确认未来 create/send/resume/cancel 的权限边界均未授权",
+    cannotConfirm: "不能确认任何工具窗口、消息或任务已经创建、发送或恢复",
+    next: "待独立适配器 Gate 和逐项授权后再讨论真实写入",
   },
   "demo-boundary": {
     title: "演示数据边界",
@@ -551,6 +568,13 @@ function renderScreenThree(): string {
         <div class="state-cell"><span>消息本机写入</span>${statusTag("已写入本机消息记录", "notice", "↳")}<span class="state-code">local_written</span></div>
         <div class="state-cell"><span>消息送达</span>${statusTag("尚未确认送达", "unknown", "○")}<span class="state-code">sent_not_confirmed</span></div>
       </div>
+      <section class="plan-preview-card" aria-labelledby="plan-preview-title">
+        <div class="plan-preview-card__heading"><div><p class="eyebrow">执行前先看计划</p><h2 id="plan-preview-title">所有外部动作默认未授权</h2></div>${state.dryRunPlan ? statusTag("计划已保存 · 未授权执行", "notice", "○") : statusTag("尚未生成", "unknown", "○")}</div>
+        <p>工作台可以把创建、发送、恢复、取消列成可审阅计划，但本阶段不会启动进程、读取会话、联网或写入外部 Agent。</p>
+        ${state.dryRunPlan ? `<ol class="plan-step-list">${state.dryRunPlan.steps.map((step) => `<li><span class="plan-step-mark" aria-hidden="true">○</span><span><strong>${escapeHtml(step.label)}</strong><small>execution: ${escapeHtml(step.status)} · 需要独立确认</small></span></li>`).join("")}</ol><div class="plan-preview-meta"><span>来源 ${escapeHtml(state.dryRunPlan.data_source)}</span><button class="inline-evidence" type="button" data-action="open-evidence" data-evidence="plan">查看计划依据</button></div>` : `<p class="plan-preview-empty">${hasTauri ? "点击后只保存本机计划对象，不会执行任何步骤。" : "浏览器预览不会调用桌面壳；请在 Mac 桌面版本中生成计划。"}</p>`}
+        ${state.dryRunError ? `<p class="input-error" role="alert">${escapeHtml(state.dryRunError)}</p>` : ""}
+        <button class="button button--outline" type="button" data-action="preview-plan" ${hasTauri && !state.planning && localMode ? "" : "disabled"}><span>${state.planning ? "正在生成…" : state.dryRunPlan ? "重新生成只读计划" : "生成只读执行计划"}</span><span aria-hidden="true">⌁</span></button>
+      </section>
       <div class="progress-layout">
         <section class="panel-section" aria-labelledby="members-title"><div class="section-heading"><div><p class="eyebrow">成员与进度</p><h2 id="members-title">有正式记录才进入进度轨道</h2></div><button class="icon-button" type="button" aria-label="查看正式进度依据" data-action="open-evidence" data-evidence="progress">?</button></div><div class="member-list">${renderMemberCards(group)}</div><p class="boundary-callout"><span aria-hidden="true">!</span><span><strong>最近有动静 ≠ 已完成</strong><br />文件发生变化只能说明有活动，不能代替正式进度记录。</span></p></section>
         <section class="panel-section" aria-labelledby="messages-title"><div class="section-heading"><div><p class="eyebrow">沟通记录</p><h2 id="messages-title">写入本机，不等于对方收到</h2></div><span class="heading-note">${localMode ? "本机事实" : "演示消息"}</span></div><div class="message-list">${renderMessageCard("local-written")}${renderMessageCard("delivery")}</div><div class="send-boundary"><span class="send-boundary__icon" aria-hidden="true">×</span><div><strong>当前不能发送真实消息</strong><p>没有真实连接和送达回执，按钮只提供查看依据或手动交接。</p></div></div></section>
@@ -574,6 +598,7 @@ function renderTechnicalDetails(): string {
           <div><dt>页面数据来源</dt><dd>${source}</dd></div>
           <div><dt>离线 fixture</dt><dd>${isLocalGroup() ? "local-group · 仅本机 SQLite · network=false" : "offline-demo · data_source=demo · network_required=false"}</dd></div>
           <div><dt>工具发现</dt><dd>${state.toolDiscovery ? `real · user_triggered · ${state.toolDiscovery.tools.filter((tool) => tool.status === "available").length}/${state.toolDiscovery.tools.length} 个入口可用` : "not_run · 不读取本机"}</dd></div>
+          <div><dt>只读执行计划</dt><dd>${state.dryRunPlan ? `execution=not_authorized · ${state.dryRunPlan.steps.length} 个步骤已保存` : "not_run · 不会执行外部动作"}</dd></div>
           <div><dt>本地运行基线</dt><dd>${escapeHtml(state.runtime.doctorStatus)} · ${escapeHtml(state.runtime.doctorSummary)}</dd></div>
           <div><dt>观察时间</dt><dd>${escapeHtml(observedLabel())}</dd></div>
         </dl>
@@ -600,7 +625,7 @@ function renderEvidenceDrawer(): string {
 
 function render(): void {
   const screen = state.screen === 1 ? renderScreenOne() : state.screen === 2 ? renderScreenTwo() : renderScreenThree();
-  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>${isLocalGroup() ? "M1 本机事实源" : state.toolDiscovery ? "M2 本机能力快照" : "P1-A 离线演示边界"}</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
+  app.innerHTML = `<div class="app-shell">${renderHeader()}<main class="content-column">${screen}</main>${renderTechnicalDetails()}<footer class="app-footer"><span>${state.dryRunPlan ? "M4 只读执行计划" : isLocalGroup() ? "M1 本机事实源" : state.toolDiscovery ? "M2 本机能力快照" : "P1-A 离线演示边界"}</span><span>不创建 · 不发送 · 不读取正文</span></footer>${renderEvidenceDrawer()}</div>`;
   updateGroupButton();
   if (state.evidence) {
     requestAnimationFrame(() => app.querySelector<HTMLButtonElement>(".drawer-close")?.focus());
@@ -623,6 +648,8 @@ function enterDemo(): void {
   state.localGroup = null;
   state.idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `group-${Date.now()}`;
   state.formError = null;
+  state.dryRunPlan = null;
+  state.dryRunError = null;
   if (!state.goal) state.goal = group.goal;
   state.evidence = null;
   render();
@@ -687,6 +714,27 @@ async function discoverTools(): Promise<void> {
   render();
 }
 
+async function previewPlan(): Promise<void> {
+  if (!hasTauri || state.planning || !state.localGroup) return;
+  state.dryRunError = null;
+  state.planning = true;
+  render();
+  try {
+    const response = await invoke<CliResponse<DryRunPlan>>("plan_preview", {
+      groupId: state.localGroup.id,
+    });
+    if (!response.ok || !response.data) {
+      state.dryRunError = response.errors[0]?.message ?? "只读执行计划未完成。";
+    } else {
+      state.dryRunPlan = response.data;
+    }
+  } catch {
+    state.dryRunError = "暂时没能生成本机计划；页面没有启动任何任务。";
+  }
+  state.planning = false;
+  render();
+}
+
 function closeEvidence(): void {
   state.evidence = null;
   render();
@@ -730,6 +778,9 @@ async function handleAction(element: HTMLElement): Promise<void> {
       break;
     case "discover-tools":
       await discoverTools();
+      break;
+    case "preview-plan":
+      await previewPlan();
       break;
     case "open-evidence":
       openEvidence((element.dataset.evidence ?? "demo-boundary") as EvidenceId);

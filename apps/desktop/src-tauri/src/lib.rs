@@ -145,6 +145,61 @@ fn discover_tools(app: tauri::AppHandle) -> matrix_core::CliResponse {
     }
 }
 
+#[tauri::command]
+fn plan_preview(app: tauri::AppHandle, group_id: String) -> matrix_core::CliResponse {
+    let Ok(app_data_dir) = app.path().app_data_dir() else {
+        return matrix_core::blocked_command_response(
+            "plan.preview",
+            "app_data_unavailable",
+            "无法解析应用数据目录",
+        );
+    };
+    match matrix_core::create_dry_run_plan(&app_data_dir.join("db/app.sqlite3"), &group_id) {
+        Ok(plan) => matrix_core::CliResponse {
+            contract: "jzmatrix.cli-response".to_owned(),
+            version: "1.0.0".to_owned(),
+            command: "plan.preview".to_owned(),
+            request_id: matrix_core::new_request_id(),
+            ok: true,
+            status: matrix_core::ResponseStatus::Pass,
+            outcome: matrix_core::Outcome::Committed,
+            data: matrix_core::dry_run_plan_response_data(&plan),
+            errors: Vec::new(),
+            warnings: vec![matrix_core::WarningItem {
+                code: "execution_not_authorized".to_owned(),
+                message: "计划已保存到本机事实源，但不会启动进程、读取会话、联网或执行外部写入"
+                    .to_owned(),
+            }],
+            evidence: vec![matrix_core::EvidenceRef {
+                kind: "sqlite".to_owned(),
+                reference: "evidence:dry-run-plan".to_owned(),
+            }],
+            next_actions: Vec::new(),
+            redactions: matrix_core::Redactions {
+                profile: "v1".to_owned(),
+                fields: vec![
+                    "secrets".to_owned(),
+                    "absolute_paths".to_owned(),
+                    "session_content".to_owned(),
+                ],
+            },
+            extensions: serde_json::json!({
+                "execution": "not_authorized",
+                "network": false,
+                "external_processes": false,
+                "external_agent_processes": false,
+                "external_writes": false,
+                "existing_sessions_read": false,
+            }),
+        },
+        Err(error) => matrix_core::blocked_command_response(
+            "plan.preview",
+            error.code(),
+            "只读执行计划未完成",
+        ),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -152,7 +207,8 @@ pub fn run() {
             offline_demo,
             group_templates,
             create_group,
-            discover_tools
+            discover_tools,
+            plan_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running JZMatrix Workbench");
