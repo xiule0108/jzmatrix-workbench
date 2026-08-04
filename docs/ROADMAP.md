@@ -11,19 +11,20 @@ The roadmap is evidence-gated. Dates do not override a failed gate.
 
 No implementation construction is authorized until P0 is closed.
 
-## P1 — Installable vertical slice
+## P1 — macOS installable vertical slice
 
 - New Rust core, SQLite migrations, CLI, Tauri shell, and synthetic demo mode.
 - Three primary paths: connect tools, create a collaboration group, view progress.
-- macOS and Windows CI builds and clean-install smoke tests.
+- macOS arm64 first, then macOS x86_64 clean-install smoke tests.
+- Windows CI artifacts remain historical evidence only; Windows construction and release are deferred until the Mac public-beta Gate closes.
 
-## P2 — Capability-driven adapters
+## P2 — macOS capability-driven adapters
 
 - Adapter SDK and machine-readable capability manifests.
 - Read-only or package-generation integrations first.
 - Real round-trip probes before enabling create, resume, send, or receipt actions.
 
-## P3 — One-click collaboration groups
+## P3 — macOS one-click collaboration groups
 
 - Templates, preview, open task package, partial-failure recovery, and CLI parity.
 
@@ -31,9 +32,10 @@ No implementation construction is authorized until P0 is closed.
 
 - Separate responsibility acceptance, execution evidence, artifact submission, and consumer acceptance.
 
-## P5 — Signed public beta
+## P5 — Signed macOS public beta
 
 - Signed and notarized packages, checksums, SBOM, provenance, update and rollback, backup and recovery exercises.
+- Windows signing, runtime evidence, and release are a later terminal Gate, not part of this phase.
 
 ## Research track
 
