@@ -562,6 +562,16 @@ h1 {
   line-height: 1.5;
 }
 
+.tool-binary {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  color: var(--ink-faint);
+  background: var(--paper-deep);
+  border-radius: 5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
 .tool-scope span {
   color: var(--ink);
   font-weight: 700;
@@ -1665,6 +1675,10 @@ h1 {
 
   .tool-card .button {
     width: 100%;
+    margin-left: 57px;
+  }
+
+  .tool-binary {
     margin-left: 57px;
   }
 

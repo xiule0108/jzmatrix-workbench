@@ -103,3 +103,40 @@ export interface CollaborationGroup {
   facts: GroupFact[];
   replayed: boolean;
 }
+
+export interface ToolCatalogEntry {
+  id: string;
+  label: string;
+  binary: string;
+  description: string;
+  scope: string;
+}
+
+export interface ToolDiscoveryResult {
+  id: string;
+  label: string;
+  binary: string;
+  status: "available" | "not_found" | "timed_out" | "failed";
+  version?: string | null;
+  version_exit_code?: number | null;
+  help_status: "pass" | "not_run" | "timed_out" | "failed";
+  help_exit_code?: number | null;
+  advertised_flags: string[];
+  output_sha256?: string | null;
+  observed_at: string;
+  reason?: string | null;
+}
+
+export interface ToolDiscoverySnapshot {
+  contract: string;
+  version: string;
+  id: string;
+  observed_at: string;
+  data_source: "real";
+  invocation: "user_triggered";
+  network_requested: false;
+  existing_sessions_read: false;
+  external_writes: false;
+  tools: ToolDiscoveryResult[];
+  persisted: boolean;
+}

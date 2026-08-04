@@ -97,6 +97,12 @@ try {
     checkId: "security.no_runtime_network_or_shell",
   });
   assertInjectionBlocks({
+    name: "tool-discovery-shell-command",
+    path: "crates/matrix-core/src/tool_discovery.rs",
+    injection: '/* Command::new("sh") */',
+    checkId: "security.tool_discovery_allowlist",
+  });
+  assertInjectionBlocks({
     name: "runtime-frontend-fetch",
     path: "apps/desktop/src/main.ts",
     injection: 'fetch("https://example.invalid");',
@@ -107,7 +113,7 @@ try {
       contract: "jzmatrix.static-boundary-self-test",
       version: "1.0.0",
       ok: true,
-      cases: 13,
+      cases: 14,
     }),
   );
 } finally {

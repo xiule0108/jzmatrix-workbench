@@ -35,6 +35,11 @@ enum Commands {
         #[command(subcommand)]
         command: GroupCommands,
     },
+    /// Inspect explicitly allowlisted local tool binaries on user request.
+    Tools {
+        #[command(subcommand)]
+        command: ToolCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -78,6 +83,22 @@ enum GroupCommands {
         /// Local collaboration group id.
         #[arg(long)]
         id: String,
+        /// Emit exactly one versioned JSON response on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ToolCommands {
+    /// Discover allowlisted local binaries with fixed --version/--help probes.
+    Discover {
+        /// Emit exactly one versioned JSON response on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the static discovery catalog without probing the machine.
+    Catalog {
         /// Emit exactly one versioned JSON response on stdout.
         #[arg(long)]
         json: bool,
@@ -153,6 +174,18 @@ fn main() -> ExitCode {
             } => {
                 let response = group_show_response(&id);
                 print_group_response(&response, emit_json, "jzmatrix group show: pass");
+                ExitCode::from(response.exit_code() as u8)
+            }
+        },
+        Commands::Tools { command } => match command {
+            ToolCommands::Catalog { json: emit_json } => {
+                let response = tool_catalog_response();
+                print_group_response(&response, emit_json, "jzmatrix tools catalog: pass");
+                ExitCode::from(response.exit_code() as u8)
+            }
+            ToolCommands::Discover { json: emit_json } => {
+                let response = tool_discovery_response();
+                print_group_response(&response, emit_json, "jzmatrix tools discover: pass");
                 ExitCode::from(response.exit_code() as u8)
             }
         },
@@ -299,6 +332,104 @@ fn group_show_response(id: &str) -> CliResponse {
             "group.show",
             error.code(),
             group_error_message(error.code()),
+        ),
+    }
+}
+
+fn tool_catalog_response() -> CliResponse {
+    CliResponse {
+        contract: "jzmatrix.cli-response".to_owned(),
+        version: "1.0.0".to_owned(),
+        command: "tools.catalog".to_owned(),
+        request_id: matrix_core::new_request_id(),
+        ok: true,
+        status: ResponseStatus::Pass,
+        outcome: Outcome::NotCommitted,
+        data: json!({
+            "catalog": matrix_core::builtin_tool_catalog(),
+            "source": "built_in_fixture",
+            "probe": "not_run",
+        }),
+        errors: Vec::new(),
+        warnings: vec![matrix_core::WarningItem {
+            code: "no_probe".to_owned(),
+            message: "目录只列出固定白名单，不会检查本机或读取配置".to_owned(),
+        }],
+        evidence: vec![EvidenceRef {
+            kind: "fixture_manifest".to_owned(),
+            reference: "fixture:tool-discovery-catalog-v1".to_owned(),
+        }],
+        next_actions: Vec::new(),
+        redactions: Redactions {
+            profile: "v1".to_owned(),
+            fields: vec!["secrets".to_owned(), "absolute_paths".to_owned()],
+        },
+        extensions: json!({
+            "network": false,
+            "external_processes": false,
+            "user_triggered": false,
+        }),
+    }
+}
+
+fn tool_discovery_response() -> CliResponse {
+    let Some(app_data_dir) = matrix_core::default_app_data_dir() else {
+        return matrix_core::blocked_command_response(
+            "tools.discover",
+            "app_data_unavailable",
+            "无法解析应用数据目录",
+        );
+    };
+    match matrix_core::discover_local_tools(&app_data_dir.join("db/app.sqlite3")) {
+        Ok(snapshot) => {
+            let available = snapshot
+                .tools
+                .iter()
+                .filter(|tool| tool.status == "available")
+                .count();
+            CliResponse {
+                contract: "jzmatrix.cli-response".to_owned(),
+                version: "1.0.0".to_owned(),
+                command: "tools.discover".to_owned(),
+                request_id: matrix_core::new_request_id(),
+                ok: true,
+                status: ResponseStatus::Pass,
+                outcome: Outcome::Committed,
+                data: serde_json::to_value(snapshot).unwrap_or_else(|_| json!({})),
+                errors: Vec::new(),
+                warnings: vec![matrix_core::WarningItem {
+                    code: "allowlisted_user_triggered_probe".to_owned(),
+                    message: format!(
+                        "只检查固定白名单二进制的 --version/--help，发现 {available} 个可用入口；未读取配置或会话"
+                    ),
+                }],
+                evidence: vec![EvidenceRef {
+                    kind: "sqlite".to_owned(),
+                    reference: "evidence:tool-discovery-snapshot".to_owned(),
+                }],
+                next_actions: Vec::new(),
+                redactions: Redactions {
+                    profile: "v1".to_owned(),
+                    fields: vec![
+                        "secrets".to_owned(),
+                        "absolute_paths".to_owned(),
+                        "raw_stdout".to_owned(),
+                        "raw_stderr".to_owned(),
+                    ],
+                },
+                extensions: json!({
+                    "network_requested": false,
+                    "network_activity_observed": "not_captured",
+                    "external_processes": "allowlisted_user_triggered_only",
+                    "external_agent_processes": false,
+                    "existing_sessions_read": false,
+                }),
+            }
+        }
+        Err(error) => matrix_core::blocked_command_response(
+            "tools.discover",
+            error.code(),
+            "工具发现未完成，本机事实源未接受不完整快照",
         ),
     }
 }
